@@ -1,10 +1,10 @@
 # 使用 strobealign-aemb 丰度信息运行
 
-本项目 **Multimodal SemiBin** 在 SemiBin2 (v2.2.0) 基础上扩展（派生自 [SemiBin/SemiBin2](https://github.com/BigDataBiology/SemiBin)，© BigDataBiology，MIT 许可）。本页介绍沿用上游的 `strobealign-aemb` 丰度估计流程。该功能本身未被本项目改动，可照常使用。
+本页介绍 **MAGFuse** 中基于 `strobealign-aemb` 的丰度估计流程。
 
 `strobealign-aemb` 是一种快速的宏基因组丰度估计方法，由 [strobealign](https://github.com/ksahlin/strobealign) 0.13（或更新）版本提供，可替代传统的 BAM/CRAM 比对来生成丰度信息。出于实现原因，该模式当前要求至少 **5 个样本**。
 
-> 提示：用 aemb 得到的丰度信息会进入丰度分支编码，与本项目的 DNABERT 多模态特征可以叠加使用——两者来自不同模态，互不冲突。DNABERT 嵌入的生成方式见 [usage.md](usage.md) 与各子命令文档（[subcommands.md](subcommands.md)）。
+> 提示：用 aemb 得到的丰度信息会进入丰度分支编码，与 MAGFuse 的 DNABERT 多模态特征可以叠加使用——两者来自不同模态，互不冲突。DNABERT 嵌入的生成方式见 [usage.md](usage.md) 与各子命令文档（[subcommands.md](subcommands.md)）。
 
 ## 准备 aemb 所需数据
 
@@ -16,10 +16,10 @@
 
 ```bash
 mkdir -p aemb_output/sample1
-SemiBin2 split_contigs -i sample1_contigs.fna.gz -o aemb_output/sample1
+MAGFuse split_contigs -i sample1_contigs.fna.gz -o aemb_output/sample1
 ```
 
-执行后会生成 `aemb_output/sample1/split_contigs.fna.gz`，其中包含原始 contigs 以及拆分后的版本（split.fa，运行 SemiBin2 所必需）。
+执行后会生成 `aemb_output/sample1/split_contigs.fna.gz`，其中包含原始 contigs 以及拆分后的版本（split.fa，运行 MAGFuse 所必需）。
 
 ### 2. 用 strobealign-aemb 映射 reads 生成丰度信息
 
@@ -35,19 +35,19 @@ strobealign --aemb aemb_output/sample1/split_contigs.fna.gz read5.pair.1.fq.gz r
 
 每条命令生成一个 `sample1_sampleX.tsv` 格式的丰度文件。
 
-## 运行 SemiBin2
+## 运行 MAGFuse
 
 用 `single_easy_bin` 子命令对该样本运行，通过 `-a` 传入上一步生成的所有 `.tsv` 丰度文件：
 
 ```bash
-SemiBin2 single_easy_bin -i contig.fa -a sample1_*.tsv -o aemb_output/sample1
+MAGFuse single_easy_bin -i contig.fa -a sample1_*.tsv -o aemb_output/sample1
 ```
 
 ⚠️ 应当对 **原始 contigs** 进行分箱，**不要** 用拆分后的 split contigs。
 
 结果 bins 会写入 `aemb_output/sample1` 目录。
 
-注意：从 SemiBin2 的角度看，即使丰度信息来自多个样本，这仍属于 **单样本分箱**，因为组装结果来自单一样本。
+注意：从分箱角度看，即使丰度信息来自多个样本，这仍属于 **单样本分箱**，因为组装结果来自单一样本。
 
 > 可选：在 `single_easy_bin` 上叠加 DNABERT 多模态时，可加入 `--dnabert-model` 等参数，并相应调整图融合权重（`--fusion-weights-multimodal`）。参数细节见 [subcommands.md](subcommands.md)。
 
@@ -80,7 +80,7 @@ samples = [
         ]
 
 STROBEALIGN_THREADS = 8
-SEMIBIN_THREADS = STROBEALIGN_THREADS
+MAGFUSE_THREADS = STROBEALIGN_THREADS
 
 @TaskGenerator
 def generate_inputs(s):
@@ -90,7 +90,7 @@ def generate_inputs(s):
     out = f'aemb_output/{s}'
     makedirs(out, exist_ok=True)
     subprocess.check_call(
-            ['SemiBin2', 'split_contigs',
+            ['MAGFuse', 'split_contigs',
              '-i', contigs,
              '-o', out])
     return out
@@ -122,8 +122,8 @@ for s in samples:
         tsv.append(cross_map(out, s, s2))
 
     sb = jug_execute(
-        ['SemiBin2', 'single_easy_bin',
-            '--threads', str(SEMIBIN_THREADS),
+        ['MAGFuse', 'single_easy_bin',
+            '--threads', str(MAGFUSE_THREADS),
             '-i', f'samples/{s}_assembled.fna.gz',
             '-a'] + tsv + [
                 '-o', f'aemb_output/{s}'])
@@ -135,12 +135,3 @@ for s in samples:
 - [subcommands.md](subcommands.md)：子命令与参数（含 DNABERT / 图融合参数）
 - [generate.md](generate.md)：特征生成
 - [output.md](output.md)：输出说明
-
-## 致谢与引用
-
-本流程沿用上游 SemiBin2，请引用：
-
-- Pan et al., *Nat Commun* 13, 2326 (2022). https://doi.org/10.1038/s41467-022-29843-y
-- Pan et al., *Bioinformatics* 39(Suppl_1): i21–i29 (2023). https://doi.org/10.1093/bioinformatics/btad209
-
-若使用了 DNABERT 多模态特征，请同时引用 [DNABERT-S](https://github.com/MAGICS-LAB/DNABERT_S)。

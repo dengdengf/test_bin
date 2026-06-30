@@ -1,18 +1,16 @@
-# 生成 SemiBin 的输入文件
+# 生成 MAGFuse 的输入文件
 
-本页介绍如何从原始 reads 出发，准备 Multimodal SemiBin 所需的全部输入：
+本页介绍如何从原始 reads 出发，准备 MAGFuse 所需的全部输入：
 
-1. contigs（组装结果）+ 排序 BAM —— 沿用上游 SemiBin2 做法。
+1. contigs（组装结果）+ 排序 BAM。
 2. 用 `generate_sequence_features_single` / `generate_sequence_features_multi` 生成 `data.csv` 与 `data_split.csv`。
-3. （本项目新增）用 `generate_berts.py` 生成 DNABERT 嵌入。
+3. 用 `generate_berts.py` 生成 DNABERT 嵌入。
 
-> Multimodal SemiBin 派生自 [SemiBin/SemiBin2](https://github.com/BigDataBiology/SemiBin)（© BigDataBiology，MIT 许可）。本页的 contigs 组装、BAM 比对、序列特征生成等步骤与上游一致，特此致谢。引用信息见 [index.md](index.md)。
-
-相关页面：[install.md](install.md) · [usage.md](usage.md) · [subcommands.md](subcommands.md) · [output.md](output.md) · [aemb.md](aemb.md) · [semibin2.md](semibin2.md)
+相关页面：[install.md](install.md) · [usage.md](usage.md) · [subcommands.md](subcommands.md) · [output.md](output.md) · [aemb.md](aemb.md) · [methods.md](methods.md)
 
 ---
 
-## 1. 从 reads 得到 contigs 与排序 BAM（沿用上游）
+## 1. 从 reads 得到 contigs 与排序 BAM
 
 从一个宏基因组样本出发，你需要先得到一个 contigs 文件（`contig.fa`）和一个排序后的 BAM 文件（`output.sorted.bam`，由 reads 比对回组装好的 contigs 得到）。
 
@@ -68,12 +66,12 @@ samtools index contig.mapped.sorted.bam
 - `data.csv` —— 整条 contig 的特征（136 维 canonical 四核苷酸组成 + 丰度）。
 - `data_split.csv` —— 每条 contig 被切成两半（命名形如 `h_1` / `h_2`，见 `SemiBin/generate_kmer.py`）后的特征，用于自监督学习的成对构造。
 
-> 组成特征是 136 维 canonical 四核苷酸频率；丰度归一化逻辑与上游一致。这两点本项目均未改动。
+> 组成特征是 136 维 canonical 四核苷酸频率，并对丰度做归一化处理。
 
 ### 单样本（single）
 
 ```bash
-SemiBin2 generate_sequence_features_single \
+MAGFuse generate_sequence_features_single \
     -i contig.fa \
     -b output.sorted.bam \
     -o output
@@ -84,13 +82,13 @@ SemiBin2 generate_sequence_features_single \
 多样本流程需要先把各样本的 contigs 拼接（contig 名加样本前缀），再统一比对，最后生成各样本的特征：
 
 ```bash
-SemiBin2 concatenate_fasta \
+MAGFuse concatenate_fasta \
     -i sample1.fa sample2.fa sample3.fa \
     -o output
 
 # 把各样本 reads 比对到 output/concatenated.fa.gz，得到每个样本的排序 BAM
 
-SemiBin2 generate_sequence_features_multi \
+MAGFuse generate_sequence_features_multi \
     -i output/concatenated.fa.gz \
     -b sample1.sorted.bam sample2.sorted.bam sample3.sorted.bam \
     -o output
@@ -102,11 +100,11 @@ SemiBin2 generate_sequence_features_multi \
 
 ---
 
-## 3. 生成 DNABERT 嵌入（本项目新增）
+## 3. 生成 DNABERT 嵌入
 
-Multimodal SemiBin 在组成 / 丰度之外引入第三条模态：用 [DNABERT-S](https://github.com/MAGICS-LAB/DNABERT_S) 对 contig 序列做嵌入，再与组成、丰度一起送入多模态融合模型。该模态仅在短读长（`short_read`）训练路径上启用。
+MAGFuse 在组成 / 丰度之外引入第三条模态：用 [DNABERT-S](https://github.com/MAGICS-LAB/DNABERT_S) 对 contig 序列做嵌入，再与组成、丰度一起送入多模态融合模型。该模态仅在短读长（`short_read`）训练路径上启用。
 
-> DNABERT-S 预训练权重较大，已被 `.gitignore`，**不随仓库分发**。请自行从 <https://github.com/MAGICS-LAB/DNABERT_S> 获取权重，放到 `SemiBin/DNABERT-S/`，或在运行时用 `--dnabert-model` 指定路径。用到 DNABERT 请在论文中引用 DNABERT-S。
+> DNABERT-S 预训练权重较大，已被 `.gitignore`，**不随仓库分发**。请自行从 <https://github.com/MAGICS-LAB/DNABERT_S> 获取权重，放到 `SemiBin/DNABERT-S/`，或在运行时用 `--dnabert-model` 指定路径。
 
 ### 3.1 为什么要手动生成
 
@@ -172,7 +170,7 @@ python SemiBin/generate_berts.py -md /path/DNABERT-S \
 
 > **注意**：除非你清楚自己在做什么，否则通常**不需要**这一步。半监督相关说明见 [semi-supervised.md](semi-supervised.md)。
 
-SemiBin 默认用 mmseqs2，但你也可以用 [CAT](https://github.com/dutilh/CAT) 产生 contig 分类，再据此生成 cannot-link 对。
+MAGFuse 默认用 mmseqs2，但你也可以用 [CAT](https://github.com/dutilh/CAT) 产生 contig 分类，再据此生成 cannot-link 对。
 
 ```bash
 CAT contigs \

@@ -1,10 +1,10 @@
 ## 子命令参考
 
-本页详尽列出 Multimodal SemiBin 的各个子命令及其参数。命令行入口为 `SemiBin2`（向后兼容 `SemiBin`），子命令集与上游 SemiBin2 (v2.2.0) 保持一致。需要更易读的整体用法说明，请参见 [usage](usage.md)；输入文件的生成方式见 [generate](generate.md)。
+本页详尽列出 MAGFuse 的各个子命令及其参数。命令行入口为 `MAGFuse`。需要更易读的整体用法说明，请参见 [usage](usage.md)；输入文件的生成方式见 [generate](generate.md)。
 
-> Multimodal SemiBin 在 SemiBin2 基础上扩展了多模态嵌入、多视图图融合聚类、标记基因去污染重聚类与 DNABERT 特征提取等能力。这些改动只影响**短读长 (short_read)** 训练与聚类路径；其余流程沿用 SemiBin2。详见 [whatsnew](whatsnew.md) 与 [semibin2](semibin2.md)。
+> MAGFuse 提供多模态嵌入、多视图图融合聚类、标记基因去污染重聚类与 DNABERT 特征提取等能力。这些能力只影响**短读长 (short_read)** 训练与聚类路径；长读长路径采用 DBSCAN 集成算法。核心方法见 [methods](methods.md)，更新说明见 [whatsnew](whatsnew.md)。
 
-SemiBin 采用**子命令**式接口。大多数场景只需 `single_easy_bin` 或 `multi_easy_bin`，若需要更精细的控制，可使用其它子命令分步执行。
+MAGFuse 采用**子命令**式接口。大多数场景只需 `single_easy_bin` 或 `multi_easy_bin`，若需要更精细的控制，可使用其它子命令分步执行。
 
 ### single_easy_bin
 
@@ -28,11 +28,11 @@ SemiBin 采用**子命令**式接口。大多数场景只需 `single_easy_bin` �
 若未指定 `--environment`，则会训练一个新模型，计算开销较大。
 
 * `--self-supervised` 或 `--semi-supervised`：指定训练算法。自监督方式通常在效果与计算资源占用上更优；半监督方式属于较早的（已弃用）路线，参见 [semi-supervised](semi-supervised.md)。
-* `--sequencing-type=short_reads`/`--sequencing-type=long_reads`：测序类型。**本项目的多模态扩展仅在 `short_reads` 路径生效**；`long_reads` 沿用 SemiBin2 的 DBSCAN 集成算法，未做改动。
+* `--sequencing-type=short_reads`/`--sequencing-type=long_reads`：测序类型。**多模态扩展仅在 `short_reads` 路径生效**；`long_reads` 采用 DBSCAN 集成算法。
 
-#### 多模态 / DNABERT 训练参数（本项目新增）
+#### 多模态 / DNABERT 训练参数
 
-下列参数控制本项目新增的多模态嵌入与 DNABERT 特征分支，仅在短读长训练路径有效。多模态嵌入模型的结构见 `SemiBin/multimodal_model.py`（组成 / 丰度 / DNABERT 三分支编码 + 学习式 softmax 门控融合 + 向 DNABERT 单向对齐的跨模态对齐损失，对齐使用 stop-gradient/detach）。
+下列参数控制多模态嵌入与 DNABERT 特征分支，仅在短读长训练路径有效。多模态嵌入模型的结构见 `SemiBin/multimodal_model.py`（组成 / 丰度 / DNABERT 三分支编码 + 学习式 softmax 门控融合 + 向 DNABERT 单向对齐的跨模态对齐损失，对齐使用 stop-gradient/detach）。
 
 * `--dnabert-model PATH`：DNABERT-S 模型目录（默认：内置 `SemiBin/DNABERT-S` 目录）。预训练权重较大，已 gitignore，不随仓库分发，需单独获取放到该目录或用本参数指定。权重来源见下文“DNABERT 用法要点”。
 * `--dnabert-python PATH`：用于运行 DNABERT 推理的 Python 解释器（默认：环境变量 `$SEMIBIN_DNABERT_PYTHON`，否则使用当前解释器）。
@@ -40,9 +40,9 @@ SemiBin 采用**子命令**式接口。大多数场景只需 `single_easy_bin` �
 
 > 说明：`single_easy_bin` 内置的 `--dnabert-model` 会自动提取 DNABERT 嵌入，但对 split 半段存在局限（原始 fasta 中没有 `h_1`/`h_2` 这样的 split 名称）。需要 split 嵌入时，推荐用 `SemiBin/generate_berts.py` 显式生成，见下文。
 
-#### 图融合 / 聚类参数（本项目新增）
+#### 图融合 / 聚类参数
 
-下列参数控制本项目新增的多视图相似度图融合聚类（`SemiBin/graph_fusion.py` 与 `SemiBin/cluster.py`）。对 embedding / 组成 / 丰度 /（可选）DNABERT 各建一张 kNN 相似度图，按权重融合后跑 Infomap 进行全局聚类。
+下列参数控制多视图相似度图融合聚类（`SemiBin/graph_fusion.py` 与 `SemiBin/cluster.py`）。对 embedding / 组成 / 丰度 /（可选）DNABERT 各建一张 kNN 相似度图，按权重融合后跑 Infomap 进行全局聚类。
 
 * `--knn-kernel {median,local}`：kNN 相似度图所用的核函数（默认 `median`）。
 * `--fusion-weights EMB COMP ABUND`：未启用 DNABERT 时的三路融合权重（默认 `0.60 0.25 0.15`，依次对应 embedding / 组成 / 丰度）。
@@ -51,25 +51,25 @@ SemiBin 采用**子命令**式接口。大多数场景只需 `single_easy_bin` �
 
 #### 控制输出的可选参数
 
-* `--compression`：是否压缩输出以节省空间，取值之一：`none`（`SemiBin` 默认）/ `gz`（`SemiBin2` 默认）/ `xz` / `bz2`。
+* `--compression`：是否压缩输出以节省空间，取值之一：`none` / `gz`（默认）/ `xz` / `bz2`。
 * `--tag-output`：若传入（如 `--tag-output=mysample`），输出的 bin 文件名会带上该标签，便于区分多次运行的结果。
 
 #### 控制计算资源占用的可选参数
 
 * `-p/--processes/-t/--threads`：使用的 CPU 数（默认 `0` 表示使用全部 CPU）。
-* `--write-pre-reclustering-bins`/`--no-write-pre-reclustering-bins`：是否写出重聚类前的 bin（`SemiBin1` 默认写出，`SemiBin2` 默认不写出）。
+* `--write-pre-reclustering-bins`/`--no-write-pre-reclustering-bins`：是否写出重聚类前的 bin（默认不写出）。
 * `--engine`：训练所用设备（`auto`/`gpu`/`cpu`）；`auto`（默认）会尝试检测并使用 GPU，找不到则回退到 CPU。
 * `--tmpdir`：设置临时目录。
-* `-r/--reference-db-data-dir`：GTDB 参考目录（默认 `$HOME/.cache/SemiBin/mmseqs2-GTDB`）。仅在使用已弃用的半监督模式时有用；此时 SemiBin 会在该路径找不到 GTDB 时惰性下载（占用较多磁盘空间）。
+* `-r/--reference-db-data-dir`：GTDB 参考目录（默认 `$HOME/.cache/SemiBin/mmseqs2-GTDB`）。仅在使用已弃用的半监督模式时有用；此时 MAGFuse 会在该路径找不到 GTDB 时惰性下载（占用较多磁盘空间）。
 
 #### 设置内部参数的可选参数
 
 * `--random-seed`：随机种子，用于复现结果。
-* `--orf-finder`：用于估计 bin 数量的基因预测器，取值之一：`prodigal`（`v0.7` 起默认）、`fast-naive`（`v1.5` 起提供，内置的极快实现，v2 起默认）、`fraggenescan`（比 `prodigal` 快，但不能在所有平台安装，且仍不及 `fast-naive`）。
+* `--orf-finder`：用于估计 bin 数量的基因预测器，取值之一：`prodigal`、`fast-naive`（内置的极快实现，默认）、`fraggenescan`（比 `prodigal` 快，但不能在所有平台安装，且仍不及 `fast-naive`）。
 
 #### 跳过内部步骤的可选参数
 
-若你希望在 SemiBin 之外自行计算某些内部步骤，可将其跳过。例如 mmseqs2 的 contig 注释耗时较长，若你已独立完成，可在此复用结果以避免重算。
+若你希望在 MAGFuse 之外自行计算某些内部步骤，可将其跳过。例如 mmseqs2 的 contig 注释耗时较长，若你已独立完成，可在此复用结果以避免重算。
 
 这些属于高级用法，传入格式错误的文件容易导致次优或无意义的结果。
 
@@ -87,8 +87,8 @@ SemiBin 采用**子命令**式接口。大多数场景只需 `single_easy_bin` �
 * `--batch-size`：训练过程的 batch 大小（默认 2048）。
 * `--max-node`：被纳入分箱的 contig 比例（默认 1）。
 * `--max-edges`：单个 contig 可连接的最大边数（默认 200）。
-* `--ratio`：若长度在 1000–2500 bp 之间的 contig 碱基总数占比小于该值，则最小长度设为 1000 bp，否则设为 2500 bp。若已设置 `-m` 则无需本参数。分步使用 SemiBin 时，请在所有子命令中保持一致（默认 0.05）。
-* `-m/--min-len`：分箱中 contig 的最小长度。分步使用 SemiBin 时请在所有子命令中保持一致（默认由 SemiBin 根据上述 1000–2500 bp 占比在 1000 bp / 2500 bp 间选择）。
+* `--ratio`：若长度在 1000–2500 bp 之间的 contig 碱基总数占比小于该值，则最小长度设为 1000 bp，否则设为 2500 bp。若已设置 `-m` 则无需本参数。分步使用 MAGFuse 时，请在所有子命令中保持一致（默认 0.05）。
+* `-m/--min-len`：分箱中 contig 的最小长度。分步使用 MAGFuse 时请在所有子命令中保持一致（默认由 MAGFuse 根据上述 1000–2500 bp 占比在 1000 bp / 2500 bp 间选择）。
 * `--ml-threshold`：生成 must-link 约束的长度阈值。默认从 contig 中计算，最小默认值为 4000 bp。
 * `--cannot-name`：cannot-link 文件名（默认 `cannot`）。
 
@@ -185,9 +185,9 @@ SemiBin 采用**子命令**式接口。大多数场景只需 `single_easy_bin` �
 * `-p/--processes/-t/--threads`、`--ratio`、`--min-len`、`--ml-threshold` 与 `--tmpdir`，含义同 `single_easy_bin`。
 * `-s/--separator`，含义同 `multi_easy_bin`。
 
-### train（在 SemiBin2 中为 `train_semi`）
+### train
 
-`train`（`SemiBin2` 中为 `train_semi`）以 contig 文件，以及 `generate_sequence_features_single`/`generate_sequence_features_multi` 与 `generate_cannot_links` 的输出（`data.csv`、`data_split.csv`、`cannot.txt`）为输入，输出训练好的模型。
+`train` 以 contig 文件，以及 `generate_sequence_features_single`/`generate_sequence_features_multi` 与 `generate_cannot_links` 的输出（`data.csv`、`data_split.csv`、`cannot.txt`）为输入，输出训练好的模型。
 
 注意：你可以用多个样本训练出一个供单样本分箱使用的模型。
 
@@ -256,11 +256,11 @@ SemiBin 采用**子命令**式接口。大多数场景只需 `single_easy_bin` �
 * 图融合 / 聚类参数 `--knn-kernel`、`--fusion-weights`、`--fusion-weights-multimodal`、`--no-coabundance-kl`，含义同 `single_easy_bin`（这些参数影响短读长的图融合聚类与重聚类阶段）。
 * `--minfasta-kbs`、`--max-node`、`--max-edges`、`-p/--processes/-t/--threads`、`--random-seed`、`--environment`、`--ratio`、`--min-len`、`--no-recluster`、`--orf-finder`、`--engine` 与 `--depth-metabat2`，含义同 `single_easy_bin`。
 
-> 关于短读长的重聚类：本项目对被判为污染的 bin 采用“带种子的标签传播”（personalized-PageRank，α 随 bin 大小自适应、按 contig 长度加权扩散、用 top-2 置信度边际把边界 contig 留作未分配）进行去污染拆分，且仅当单拷贝标记基因冗余度下降时才接受拆分（见 `SemiBin/marker_refinement.py`）。
+> 关于短读长的重聚类：MAGFuse 对被判为污染的 bin 采用“带种子的标签传播”（personalized-PageRank，α 随 bin 大小自适应、按 contig 长度加权扩散、用 top-2 置信度边际把边界 contig 留作未分配）进行去污染拆分，且仅当单拷贝标记基因冗余度下降时才接受拆分（见 `SemiBin/marker_refinement.py`）。
 
 ### bin_long
 
-`bin_long` 以 contig 文件，以及 `generate_sequence_features_single`/`generate_sequence_features_multi` 与 `train` 的输出（`data.csv`、`model.pt`）为输入，将最终 bin 输出到 `output_bins` 目录。本子命令沿用 SemiBin2 的 DBSCAN 集成算法，**本项目未对长读长路径做改动**（多模态与图融合扩展不在此路径生效）。
+`bin_long` 以 contig 文件，以及 `generate_sequence_features_single`/`generate_sequence_features_multi` 与 `train` 的输出（`data.csv`、`model.pt`）为输入，将最终 bin 输出到 `output_bins` 目录。本子命令采用 DBSCAN 集成算法（多模态与图融合扩展不在长读长路径生效）。
 
 #### 必需参数
 
@@ -309,7 +309,7 @@ SemiBin 采用**子命令**式接口。大多数场景只需 `single_easy_bin` �
 
 * `-s`/`--separator`，含义同 `multi_easy_bin`（见上文说明）。
 * `-m`：丢弃长度低于该值的序列（默认 0）。
-* `--compression`：是否压缩输出（`SemiBin2` 下默认 `gz`）。
+* `--compression`：是否压缩输出（默认 `gz`）。
 
 ### citation
 
@@ -339,13 +339,3 @@ python SemiBin/generate_berts.py -md /path/DNABERT-S \
 
 * 输出文件名必须为 `dnabert_embedding.npy` / `dnabert_split_embedding.npy`，放在 `data.csv` 同目录；fasta 的行序须与 `data.csv` / `data_split.csv` 一致（`load_multimodal_embeddings` 会逐行校验）。
 * `single_easy_bin`/`multi_easy_bin` 内置的 `--dnabert-model` 自动提取路径对 split 半段有局限（原始 fasta 里没有 `h_1`/`h_2`），推荐用 `generate_berts.py` 显式生成。
-
----
-
-## 致谢与引用
-
-Multimodal SemiBin 派生自 [SemiBin / SemiBin2](https://github.com/dengdengf/test_bin)（© BigDataBiology，MIT 许可），在其基础上扩展多模态能力。请保留对上游的致谢，并引用：
-
-* Pan et al., *Nat Commun* 13, 2326 (2022). <https://doi.org/10.1038/s41467-022-29843-y>
-* Pan et al., *Bioinformatics* 39(Suppl_1): i21–i29 (2023). <https://doi.org/10.1093/bioinformatics/btad209>
-* 若使用了 DNABERT，请同时引用 DNABERT-S。

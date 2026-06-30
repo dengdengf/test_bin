@@ -1,10 +1,10 @@
 # 安装指南
 
-本页介绍如何安装 **Multimodal SemiBin** —— 在 SemiBin2 (v2.2.0) 基础上扩展的多模态宏基因组分箱工具（MIT 许可，派生自 [SemiBin/SemiBin2](https://github.com/BigDataBiology/SemiBin)，© BigDataBiology）。
+本页介绍如何安装 **MAGFuse** —— 一个独立的多模态宏基因组分箱工具（MIT 许可）。
 
-本项目通过源码安装，命令行入口仍为 `SemiBin2`（向后兼容 `SemiBin`）。
+本项目通过源码安装，命令行入口为 `MAGFuse`。
 
-> 关于本项目相对上游 SemiBin2 的改动（多模态嵌入、多视图图融合聚类、标记基因去污染重聚类、DNABERT 特征提取），请参见 [whatsnew.md](whatsnew.md) 与 [usage.md](usage.md)。
+> 关于 MAGFuse 的核心方法与特性（多模态嵌入、多视图图融合聚类、标记基因去污染重聚类、DNABERT 特征提取），请参见 [methods.md](methods.md)、[whatsnew.md](whatsnew.md) 与 [usage.md](usage.md)。
 
 ## Python 版本要求
 
@@ -12,11 +12,11 @@
 
 ## 1. 外部依赖
 
-SemiBin 运行需要以下外部命令行工具，推荐用 conda 从 bioconda 安装：
+MAGFuse 运行需要以下外部命令行工具，推荐用 conda 从 bioconda 安装：
 
 ```bash
-conda create -n SemiBin python
-conda activate SemiBin
+conda create -n MAGFuse python
+conda activate MAGFuse
 conda install -c conda-forge -c bioconda bedtools hmmer samtools
 ```
 
@@ -44,11 +44,11 @@ cd test_bin
 pip install .
 ```
 
-安装完成后即可使用 `SemiBin2`（及别名 `SemiBin`）命令。验证：
+安装完成后即可使用 `MAGFuse` 命令。验证：
 
 ```bash
-SemiBin2 --version
-SemiBin2 --help
+MAGFuse --version
+MAGFuse --help
 ```
 
 > 如需 GPU 加速，请按 [PyTorch 官网](https://pytorch.org/get-started/locally/) 的说明先安装带 CUDA 支持的 PyTorch，再执行上面的 `pip install .`。
@@ -96,14 +96,3 @@ python SemiBin/generate_berts.py -md /path/DNABERT-S \
 - split 半段名称形如 `h_1` / `h_2`（见 `generate_kmer.py`），原始 fasta 中没有这些半段，因此 `single_easy_bin` / `multi_easy_bin` 内置的自动提取对 split 有局限，推荐用 `generate_berts.py` 显式生成。
 
 DNABERT 的具体用法见 [usage.md](usage.md) 与 [generate.md](generate.md)。
-
-## 引用
-
-如果本工具对你的研究有帮助，请引用上游 SemiBin / SemiBin2：
-
-- Pan et al., *Nat Commun* 13, 2326 (2022). <https://doi.org/10.1038/s41467-022-29843-y>
-- Pan et al., *Bioinformatics* 39(Suppl_1): i21–i29 (2023). <https://doi.org/10.1093/bioinformatics/btad209>
-
-如果使用了 DNABERT 特征，请同时引用 DNABERT-S（[MAGICS-LAB/DNABERT_S](https://github.com/MAGICS-LAB/DNABERT_S)）。
-
-引用信息也可通过 `SemiBin2 citation` 获取。

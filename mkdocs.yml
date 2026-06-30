@@ -1,4 +1,4 @@
-site_name: "Multimodal SemiBin"
+site_name: "MAGFuse"
 repo_url: "https://github.com/dengdengf/test_bin"
 repo_name: "GitHub"
 
@@ -12,7 +12,7 @@ nav:
         - '项目总览': index.md
         - '安装': install.md
         - '用法示例': usage.md
-        - '相对 SemiBin2 的改动': semibin2.md
+        - '核心方法与特性': methods.md
         - '生成输入': generate.md
         - '输出说明': output.md
         - '使用 AEMB 丰度': aemb.md

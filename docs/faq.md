@@ -1,7 +1,6 @@
 # 常见问题（FAQ）
 
-本页收集 Multimodal SemiBin 使用中的常见问题。命令行入口为 `SemiBin2`（向后兼容 `SemiBin`）。
-本项目派生自 SemiBin/SemiBin2（© BigDataBiology），保留对上游的致谢与引用，详见 [citation](#引用)。
+本页收集 MAGFuse 使用中的常见问题。命令行入口为 `MAGFuse`。
 
 相关页面：[index.md](index.md)、[install.md](install.md)、[usage.md](usage.md)、[generate.md](generate.md)、[output.md](output.md)、[training.md](training.md)、[subcommands.md](subcommands.md)。
 
@@ -19,8 +18,6 @@ DNABERT-S 的预训练权重文件较大，已在 `.gitignore` 中排除，**不
   2. 放到任意位置，运行时用 `--dnabert-model PATH` 指定。
 
 如果你的 DNABERT 推理需要独立的 Python 环境，可用 `--dnabert-python PATH` 指定解释器（默认读取环境变量 `$SEMIBIN_DNABERT_PYTHON`，否则用当前解释器）。
-
-> 使用了 DNABERT 嵌入，请在引用中一并引用 DNABERT-S（见下方 [引用](#引用)）。
 
 ### 如何生成 DNABERT 嵌入？
 
@@ -67,21 +64,21 @@ python SemiBin/generate_berts.py -md /path/DNABERT-S \
 
 ### 长读长会走多模态吗？
 
-**不会。** 长读长（`--sequencing-type=long_read` 或 `bin_long` 子命令）沿用上游 SemiBin2 的 DBSCAN 集成聚类算法，本项目未改动该路径，**不启用** DNABERT 多模态嵌入与图融合。多模态仅在短读长路径下生效。
+**不会。** 长读长（`--sequencing-type=long_read` 或 `bin_long` 子命令）使用 DBSCAN 集成聚类算法，**不启用** DNABERT 多模态嵌入与图融合。多模态仅在短读长路径下生效。
 
 ---
 
 ## 通用问题
 
-### Multimodal SemiBin 支持长读长数据吗？
+### MAGFuse 支持长读长数据吗？
 
-支持。使用 `--sequencing-type=long_read`（或 `bin_long` 子命令）即可，走的是 SemiBin2 的长读长聚类算法。该路径在本项目中保持不变。
+支持。使用 `--sequencing-type=long_read`（或 `bin_long` 子命令）即可，走的是长读长 DBSCAN 聚类算法。注意此时不会启用多模态特性。
 
 ### 我有混合数据（短读长 + 长读长）怎么办？
 
 一般按长读长流程处理，即使用 `--sequencing-type=long_read`。注意此时不会启用多模态特性。
 
-### Multimodal SemiBin 能用于真核基因组吗？
+### MAGFuse 能用于真核基因组吗？
 
 技术上可以，并能产出 bin，但工具并非为此优化，基准测试均基于原核数据。
 
@@ -92,7 +89,7 @@ python SemiBin/generate_berts.py -md /path/DNABERT-S \
 
 ### 能用其它版本的 GTDB 做注释吗？
 
-> **注意**：这仅与已弃用的 _SemiBin1_ 流程相关。
+> **注意**：这仅与已弃用的半监督注释流程相关。
 
 可以，有两种方式：
 
@@ -100,16 +97,3 @@ python SemiBin/generate_berts.py -md /path/DNABERT-S \
 2. 用任意版本的 GTDB 预先用 mmseqs 计算 contig 注释，再用 `--taxonomy-annotation-table` 把注释表传入。注意工具期望的是 mmseqs 格式文件，格式不符会产生无意义结果。
 
 第二种方式较复杂，但当 contig 的分类注释本身需要服务于更大的流程（不只为本工具）时较为合理。
-
----
-
-## 引用
-
-如果本工具对你的研究有帮助，请引用上游 SemiBin/SemiBin2：
-
-- Pan et al., *Nat Commun* 13, 2326 (2022). <https://doi.org/10.1038/s41467-022-29843-y>
-- Pan et al., *Bioinformatics* 39(Suppl_1): i21–i29 (2023). <https://doi.org/10.1093/bioinformatics/btad209>
-
-如果使用了 DNABERT 嵌入，请同时引用 [DNABERT-S](https://github.com/MAGICS-LAB/DNABERT_S)。
-
-可用 `SemiBin2 citation` 子命令查看引用信息。

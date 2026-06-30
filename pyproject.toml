@@ -3,9 +3,9 @@ requires = ["setuptools>=42", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "SemiBin"
+name = "MAGFuse"
 dynamic = ['version']
-description = "Metagenomic binning with siamese neural networks"
+description = "MAGFuse: multimodal metagenomic binning (composition + abundance + genomic language model) with multi-view graph fusion"
 readme = "README.md"
 requires-python = ">=3.8"
 authors = [
@@ -37,12 +37,14 @@ dependencies = [
     "requests",
     "numexpr",
 ]
-urls = { homepage = "https://github.com/BigDataBiology/SemiBin" }
+urls = { homepage = "https://github.com/dengdengf/test_bin" }
 
 [project.optional-dependencies]
 dev = ['pytest', 'hypothesis<=6.112.1']
 
 [project.scripts]
+MAGFuse = "SemiBin.main:main2"
+# backwards-compatible aliases (not documented)
 SemiBin2 = "SemiBin.main:main2"
 
 [tool.setuptools]

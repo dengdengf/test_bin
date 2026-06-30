@@ -1,12 +1,10 @@
 # 用法示例
 
-本页给出 Multimodal SemiBin 的主要用法示例。命令行入口为 `SemiBin2`（向后兼容 `SemiBin`），子命令与上游 SemiBin2 (v2.2.0) 一致。
+本页给出 MAGFuse 的主要用法示例。MAGFuse 是一个独立的多模态宏基因组分箱工具，命令行入口为 `MAGFuse`。
 
 > 关于如何准备输入（contigs 组装结果 + BAM/CRAM 或 strobealign-aemb 丰度），见 [generate](generate.md)。
 > 输出文件结构见 [output](output.md)；全部子命令与参数见 [subcommands](subcommands.md)；安装见 [install](install.md)。
-> 本项目相对上游的改动概览见 [semibin2](semibin2.md) 与 [whatsnew](whatsnew.md)。
-
-Multimodal SemiBin 派生自 [SemiBin / SemiBin2](https://github.com/BigDataBiology/SemiBin)（© BigDataBiology，MIT 许可）。请在使用时保留对上游的致谢与[引用](#引用)。
+> MAGFuse 的核心方法与特性见 [methods](methods.md) 与 [whatsnew](whatsnew.md)。
 
 ---
 
@@ -24,15 +22,15 @@ Multimodal SemiBin 派生自 [SemiBin / SemiBin2](https://github.com/BigDataBiol
 
 ---
 
-## 多模态相关的本项目特性
+## 多模态相关特性
 
-本项目在上游标准自监督流程之外，新增了以下能力（仅在此处罗列，详见 [semibin2](semibin2.md)）：
+MAGFuse 在标准自监督流程之外，提供以下能力（仅在此处罗列，详见 [methods](methods.md)）：
 
 - **多模态嵌入模型**（组成 / 丰度 / DNABERT 三分支 + 学习式门控融合 + 跨模态对齐损失）。仅在**短读长**（`short_read`）训练路径下启用，可用 `--disable-multimodal-training` 关闭、回退标准自监督。
-- **多视图相似度图融合聚类**：对 embedding / 组成 / 丰度 /（可选）DNABERT 各建 kNN 相似度图，加权融合后跑 Infomap 全局聚类。融合权重、核函数可配置，并在多样本（非 combined）下重新引入"共丰度 KL 散度"边权调制。
+- **多视图相似度图融合聚类**：对 embedding / 组成 / 丰度 /（可选）DNABERT 各建 kNN 相似度图，加权融合后跑 Infomap 全局聚类。融合权重、核函数可配置，并在多样本（非 combined）下重新引入“共丰度 KL 散度”边权调制。
 - **标记基因去污染重聚类**：在被判为污染的 bin 内做带种子的标签传播，仅当单拷贝标记基因冗余度下降时才接受拆分。
 
-新增的命令行参数：
+相关命令行参数：
 
 | 参数 | 适用子命令 | 默认值 | 说明 |
 | --- | --- | --- | --- |
@@ -55,7 +53,7 @@ Multimodal SemiBin 派生自 [SemiBin / SemiBin2](https://github.com/BigDataBiol
 如果你的宏基因组属于内置生境之一，使用预训练模型可在几分钟内返回结果（也可使用综合模型 `global`）。
 
 ```bash
-SemiBin2 single_easy_bin \
+MAGFuse single_easy_bin \
         --environment human_gut \
         -i S1.fa \
         -b S1.sorted.bam \
@@ -71,7 +69,7 @@ SemiBin2 single_easy_bin \
 不使用内置模型，针对你自己的数据学习一个新模型。会更慢，但可能得到更好的结果。短读长下默认启用多模态训练路径：
 
 ```bash
-SemiBin2 single_easy_bin \
+MAGFuse single_easy_bin \
         --self-supervised \
         -i S1.fa \
         -b S1.sorted.bam \
@@ -81,7 +79,7 @@ SemiBin2 single_easy_bin \
 如果你想关闭多模态、走标准自监督路径：
 
 ```bash
-SemiBin2 single_easy_bin \
+MAGFuse single_easy_bin \
         --self-supervised \
         --disable-multimodal-training \
         -i S1.fa \
@@ -93,10 +91,10 @@ SemiBin2 single_easy_bin \
 
 ### 长读长
 
-长读长分箱使用 `--sequencing-type=long_read`（沿用上游 DBSCAN 集成算法，本项目未改动）：
+长读长分箱使用 `--sequencing-type=long_read`（采用 DBSCAN 集成聚类算法）：
 
 ```bash
-SemiBin2 single_easy_bin \
+MAGFuse single_easy_bin \
         --environment human_gut \
         --sequencing-type long_read \
         -i S1.fa \
@@ -108,10 +106,10 @@ SemiBin2 single_easy_bin \
 
 ### 调整图融合聚类参数
 
-聚类阶段的图融合行为可通过新增参数调整。例如改用 `local` 核、自定义非多模态融合权重、并关闭共丰度 KL 调制：
+聚类阶段的图融合行为可通过相关参数调整。例如改用 `local` 核、自定义非多模态融合权重、并关闭共丰度 KL 调制：
 
 ```bash
-SemiBin2 single_easy_bin \
+MAGFuse single_easy_bin \
         --self-supervised \
         --disable-multimodal-training \
         --knn-kernel local \
@@ -125,7 +123,7 @@ SemiBin2 single_easy_bin \
 启用多模态时，使用 `--fusion-weights-multimodal`（四个权重对应 EMB / COMP / ABUND / DNA）：
 
 ```bash
-SemiBin2 single_easy_bin \
+MAGFuse single_easy_bin \
         --self-supervised \
         --fusion-weights-multimodal 0.45 0.15 0.15 0.25 \
         -i S1.fa \
@@ -140,13 +138,13 @@ SemiBin2 single_easy_bin \
 (1) 生成特征（`data.csv` / `data_split.csv`）：
 
 ```bash
-SemiBin2 generate_sequence_features_single -i S1.fa -b S1.sorted.bam -o S1_output
+MAGFuse generate_sequence_features_single -i S1.fa -b S1.sorted.bam -o S1_output
 ```
 
 (2) 训练模型（如需）。该步骤受益于 GPU，会自动检测，也可用 `--engine` 指定 CPU/GPU：
 
 ```bash
-SemiBin2 train_self \
+MAGFuse train_self \
     --data S1_output/data.csv \
     --data-split S1_output/data_split.csv \
     -o S1_output
@@ -157,7 +155,7 @@ SemiBin2 train_self \
 (3) 分箱：
 
 ```bash
-SemiBin2 bin_short \
+MAGFuse bin_short \
     -i S1.fa \
     --model S1_output/model.pt \
     --data S1_output/data.csv \
@@ -167,7 +165,7 @@ SemiBin2 bin_short \
 长读长用 `bin_long`：
 
 ```bash
-SemiBin2 bin_long \
+MAGFuse bin_long \
     -i S1.fa \
     --model S1_output/model.pt \
     --data S1_output/data.csv \
@@ -177,7 +175,7 @@ SemiBin2 bin_long \
 或用内置预训练模型（把 `--model` 换成 `--environment`）：
 
 ```bash
-SemiBin2 bin_short \
+MAGFuse bin_short \
     -i S1.fa \
     --environment human_gut \
     --data S1_output/data.csv \
@@ -195,7 +193,7 @@ SemiBin2 bin_short \
 共组装与单样本流程基本一致，区别在于生成特征时使用多个样本的 BAM。因此**无法使用预训练模型**（模型依赖样本数量）。
 
 ```bash
-SemiBin2 single_easy_bin \
+MAGFuse single_easy_bin \
     -i contig.fa \
     -b S1.sorted.bam S2.sorted.bam S3.sorted.bam \
     -o co-assembly_output
@@ -205,19 +203,19 @@ SemiBin2 single_easy_bin \
 
 ```bash
 # (1) 生成特征（仍用 single 模式，因共组装与单样本流程相近）
-SemiBin2 generate_sequence_features_single \
+MAGFuse generate_sequence_features_single \
     -i contig.fa \
     -b S1.sorted.bam S2.sorted.bam S3.sorted.bam \
     -o contig_output
 
 # (2) 训练
-SemiBin2 train_self \
+MAGFuse train_self \
     --data contig_output/data.csv \
     --data-split contig_output/data_split.csv \
     -o contig_output
 
 # (3) 分箱
-SemiBin2 bin_short \
+MAGFuse bin_short \
     -i contig.fa \
     --model contig_output/model.pt \
     --data contig_output/data.csv \
@@ -239,7 +237,7 @@ SemiBin2 bin_short \
 ### 生成 `concatenated.fa`
 
 ```bash
-SemiBin2 concatenate_fasta \
+MAGFuse concatenate_fasta \
     --input-fasta S1.fa S2.fa S3.fa S4.fa S5.fa \
     --output output
 ```
@@ -253,7 +251,7 @@ SemiBin2 concatenate_fasta \
 短读长（默认启用多模态训练）：
 
 ```bash
-SemiBin2 multi_easy_bin \
+MAGFuse multi_easy_bin \
         -i concatenated.fa \
         -b S1.sorted.bam S2.sorted.bam S3.sorted.bam S4.sorted.bam S5.sorted.bam \
         -o multi_output
@@ -262,7 +260,7 @@ SemiBin2 multi_easy_bin \
 走标准路径（关闭多模态）：
 
 ```bash
-SemiBin2 multi_easy_bin \
+MAGFuse multi_easy_bin \
         --disable-multimodal-training \
         -i concatenated.fa \
         -b S1.sorted.bam S2.sorted.bam S3.sorted.bam S4.sorted.bam S5.sorted.bam \
@@ -272,7 +270,7 @@ SemiBin2 multi_easy_bin \
 长读长：
 
 ```bash
-SemiBin2 multi_easy_bin \
+MAGFuse multi_easy_bin \
         --sequencing-type long_read \
         -i concatenated.fa \
         -b S1.sorted.bam S2.sorted.bam S3.sorted.bam S4.sorted.bam S5.sorted.bam \
@@ -288,7 +286,7 @@ SemiBin2 multi_easy_bin \
 (1) 生成 `data.csv` / `data_split.csv`：
 
 ```bash
-SemiBin2 generate_sequence_features_multi \
+MAGFuse generate_sequence_features_multi \
     -i concatenated.fa \
     -b S1.sorted.bam S2.sorted.bam S3.sorted.bam S4.sorted.bam S5.sorted.bam \
     -o multi_output
@@ -298,7 +296,7 @@ SemiBin2 generate_sequence_features_multi \
 
 ```bash
 for sample in S1 S2 S3 S4 S5 ; do
-    SemiBin2 train_self \
+    MAGFuse train_self \
         --data multi_output/samples/${sample}/data.csv \
         --data-split multi_output/samples/${sample}/data_split.csv \
         --output ${sample}_output
@@ -309,7 +307,7 @@ done
 
 ```bash
 for sample in S1 S2 S3 S4 S5 ; do
-    SemiBin2 bin_short \
+    MAGFuse bin_short \
         -i ${sample}.fa \
         --model ${sample}_output/model.pt \
         --data multi_output/samples/${sample}/data.csv \
@@ -326,7 +324,7 @@ done
 假设已有 `S1.fa`、`S1/data.csv`、`S1/data_split.csv`、`S1/cannot.txt`（`S2`、`S3` 同理），可用 3 个样本训练：
 
 ```bash
-SemiBin2 train \
+MAGFuse train \
     -i S1.fa S2.fa S3.fa \
     --data S1/data.csv S2/data.csv S3/data.csv \
     --data-split S1/data_split.csv S2/data_split.csv S3/data_split.csv \
@@ -353,7 +351,7 @@ DNABERT-S 预训练权重较大，已被 gitignore，**不随仓库分发**。�
 先生成 `data.csv` 与 `data_split.csv`（DNABERT 嵌入的行序必须与它们一致）：
 
 ```bash
-SemiBin2 generate_sequence_features_single -i S1.fa -b S1.sorted.bam -o output
+MAGFuse generate_sequence_features_single -i S1.fa -b S1.sorted.bam -o output
 ```
 
 > split 的 contig 命名形如 `h_1` / `h_2`（见 `generate_kmer.py`）。原始 FASTA 中没有这些 split 半段，因此推荐用 `generate_berts.py` 显式生成 split 嵌入，而不是依赖 `single_easy_bin` / `multi_easy_bin` 内置的自动提取（其对 split 半段有局限）。
@@ -379,7 +377,7 @@ python SemiBin/generate_berts.py -md /path/DNABERT-S \
 嵌入就位后，正常运行短读长多模态流程即可（默认启用多模态，会自动加载同目录下的 DNABERT 嵌入）：
 
 ```bash
-SemiBin2 single_easy_bin \
+MAGFuse single_easy_bin \
         --self-supervised \
         --dnabert-model /path/DNABERT-S \
         --fusion-weights-multimodal 0.45 0.15 0.15 0.25 \
@@ -389,8 +387,6 @@ SemiBin2 single_easy_bin \
 ```
 
 如需指定运行 DNABERT 推理的 Python 解释器，可用 `--dnabert-python`（或设置环境变量 `SEMIBIN_DNABERT_PYTHON`）。
-
-> 使用了 DNABERT 时，请额外引用 DNABERT-S。
 
 ---
 
@@ -403,14 +399,3 @@ SemiBin2 single_easy_bin \
 ## 配合 strobealign-aemb
 
 见专门的 [aemb](aemb.md) 页面。
-
----
-
-## 引用
-
-如果你使用了本工具，请引用上游 SemiBin：
-
-- Pan et al., *Nat Commun* 13, 2326 (2022). <https://doi.org/10.1038/s41467-022-29843-y>
-- Pan et al., *Bioinformatics* 39(Suppl_1): i21–i29 (2023). <https://doi.org/10.1093/bioinformatics/btad209>
-
-如果使用了 DNABERT 分支，请额外引用 DNABERT-S。

@@ -1,8 +1,8 @@
-# 训练 SemiBin 模型
+# 训练 MAGFuse 模型
 
-Multimodal SemiBin 沿用 SemiBin2 的机器学习思路：在分箱之前先从数据中学习（即 _训练_）出一个模型，再用该模型进行分箱。模型可以直接从将要被分箱的同一份数据中学习，这是最简单的做法，但并非唯一选择，本页将说明几种训练方式，并介绍本项目新增的**多模态训练**。
+MAGFuse 是一个独立的多模态宏基因组分箱工具。其机器学习思路是：在分箱之前先从数据中学习（即 _训练_）出一个模型，再用该模型进行分箱。模型可以直接从将要被分箱的同一份数据中学习，这是最简单的做法，但并非唯一选择，本页将说明几种训练方式，并介绍 MAGFuse 的**多模态训练**。
 
-> 命令行入口为 `SemiBin2`（向后兼容 `SemiBin`）。相关页面：[usage.md](usage.md)、[generate.md](generate.md)、[semi-supervised.md](semi-supervised.md)、[subcommands.md](subcommands.md)。
+> 命令行入口为 `MAGFuse`。相关页面：[usage.md](usage.md)、[generate.md](generate.md)、[semi-supervised.md](semi-supervised.md)、[subcommands.md](subcommands.md)。
 
 ## 单样本模型 vs 多样本模型
 
@@ -26,9 +26,9 @@ Multimodal SemiBin 沿用 SemiBin2 的机器学习思路：在分箱之前先从
 
 ## 自监督学习 vs 半监督学习
 
-SemiBin 最初（[Pan et al., Nat Commun 2022](https://doi.org/10.1038/s41467-022-29843-y)）提出的是半监督方法（SemiBin 由此得名）：对 contig 尽可能做分类学注释，再用这些分类标签来学习模型。详见 [semi-supervised.md](semi-supervised.md)。
+半监督方法（MAGFuse 中的 `train`）对 contig 尽可能做分类学注释，再用这些分类标签来学习模型。详见 [semi-supervised.md](semi-supervised.md)。
 
-后续版本支持 **自监督** 学习，这也是当前的默认模式：无需做分类学注释（注释通常是最耗时的一步），并且通常不需要多个样本即可学到较好的模型（[Pan et al., Bioinformatics 2023](https://doi.org/10.1093/bioinformatics/btad209)）。
+**自监督** 学习是当前的默认模式：无需做分类学注释（注释通常是最耗时的一步），并且通常不需要多个样本即可学到较好的模型。
 
 对应的两个子命令：
 
@@ -42,7 +42,7 @@ SemiBin 最初（[Pan et al., Nat Commun 2022](https://doi.org/10.1038/s41467-02
 ### 自监督训练示例
 
 ```bash
-SemiBin2 train_self \
+MAGFuse train_self \
     --data data.csv \
     --data-split data_split.csv \
     --output output
@@ -51,7 +51,7 @@ SemiBin2 train_self \
 ### 半监督训练示例
 
 ```bash
-SemiBin2 train \
+MAGFuse train \
     --data data.csv \
     --data-split data_split.csv \
     --cannot-link cannot.txt \
@@ -59,11 +59,11 @@ SemiBin2 train \
     --output output
 ```
 
-> 长读长（`--sequencing-type=long_read` 或 `bin_long`）沿用上游 DBSCAN 集成算法，本项目未对长读长路径做改动。
+> 长读长（`--sequencing-type=long_read` 或 `bin_long`）使用 DBSCAN 集成算法。
 
 ## 多模态训练
 
-这是本项目相对 SemiBin2 的核心扩展之一。多模态训练在标准自监督训练的基础上，额外引入 **DNABERT 语言模型嵌入** 作为第三个模态，与「组成」「丰度」两个模态共同学习（见 `SemiBin/multimodal_model.py`）。
+多模态训练是 MAGFuse 的核心能力之一。它在标准自监督训练的基础上，额外引入 **DNABERT 语言模型嵌入** 作为第三个模态，与「组成」「丰度」两个模态共同学习（见 `SemiBin/multimodal_model.py`）。
 
 ### 启用条件
 
@@ -122,12 +122,3 @@ flowchart LR
 - **跨模态对齐损失**：组成 / 丰度分支向 DNABERT 分支做**单向对齐**，对 DNABERT 一侧使用 stop-gradient（`detach`），即只让组成 / 丰度去靠拢 DNABERT，而不反向扰动 DNABERT 表示。
 
 训练完成后得到的模型与标准自监督模型用法一致，可直接传入后续的 `bin` 步骤。聚类阶段还可结合多视图图融合（见 [usage.md](usage.md) 中的 `--fusion-weights-multimodal` 等参数）。
-
-## 致谢与引用
-
-Multimodal SemiBin 派生自 [SemiBin / SemiBin2](https://github.com/BigDataBiology/SemiBin)（© BigDataBiology，MIT 许可）。如果使用本工具，请引用上游论文：
-
-- Pan, S. _et al._ SemiBin. _Nat Commun_ **13**, 2326 (2022). <https://doi.org/10.1038/s41467-022-29843-y>
-- Pan, S. _et al._ SemiBin2. _Bioinformatics_ **39**(Suppl_1): i21–i29 (2023). <https://doi.org/10.1093/bioinformatics/btad209>
-
-如果使用了 DNABERT 多模态功能，请额外引用 [DNABERT-S](https://github.com/MAGICS-LAB/DNABERT_S)。
