@@ -53,9 +53,9 @@ MAGFuse --help
 
 > 如需 GPU 加速，请按 [PyTorch 官网](https://pytorch.org/get-started/locally/) 的说明先安装带 CUDA 支持的 PyTorch，再执行上面的 `pip install .`。
 
-## 3. DNABERT 额外依赖（可选）
+## 3. DNABERT 依赖
 
-只有在使用多模态/DNABERT 特征时才需要这一步。标准自监督流程（或使用 `--disable-multimodal-training`）不依赖这些组件。
+DNABERT 多模态是 MAGFuse 短读长流程默认且始终启用的核心组成部分，因此短读长分箱需要安装以下组件。
 
 ### 3.1 Python 依赖
 
@@ -77,11 +77,10 @@ DNABERT-S 预训练权重体积较大，已被 `.gitignore`，**不随本仓库�
 | --- | --- | --- |
 | `--dnabert-model PATH` | 内置 `SemiBin/DNABERT-S` 目录 | DNABERT-S 模型路径 |
 | `--dnabert-python PATH` | `$SEMIBIN_DNABERT_PYTHON` 或当前解释器 | 运行 DNABERT 推理的 Python 解释器 |
-| `--disable-multimodal-training` | — | 关闭多模态，回退标准自监督训练 |
 
 ### 3.3 关于 DNABERT 嵌入文件
 
-DNABERT 嵌入需要 **whole + split 两份**，二者共享同一个 PCA basis（在 whole 上 fit、对 split 用 transform）。推荐用 `SemiBin/generate_berts.py` 显式生成：
+DNABERT 嵌入需要 **whole + split 两份**，二者共享同一个 PCA basis（在 whole 上 fit、对 split 用 transform）。`single_easy_bin` / `multi_easy_bin` 会**自动提取 whole 与 split**（`h_1` / `h_2` 由父 contig 自动切半），并共享同一 PCA basis，**无需手动**。如需离线/单独生成嵌入，可用等价工具 `SemiBin/generate_berts.py`：
 
 ```bash
 python SemiBin/generate_berts.py -md /path/DNABERT-S \
@@ -93,6 +92,6 @@ python SemiBin/generate_berts.py -md /path/DNABERT-S \
 
 - 输出文件名必须是 `dnabert_embedding.npy` / `dnabert_split_embedding.npy`，放在 `data.csv` 同目录；
 - fasta 行序须与 `data.csv` / `data_split.csv` 一致（`load_multimodal_embeddings` 会逐行校验）；
-- split 半段名称形如 `h_1` / `h_2`（见 `generate_kmer.py`），原始 fasta 中没有这些半段，因此 `single_easy_bin` / `multi_easy_bin` 内置的自动提取对 split 有局限，推荐用 `generate_berts.py` 显式生成。
+- split 半段名称形如 `h_1` / `h_2`（见 `generate_kmer.py`）：自动提取（含 split，共享 PCA basis）已内置处理；`generate_berts.py` 是离线/单独生成嵌入的等价工具。
 
 DNABERT 的具体用法见 [usage.md](usage.md) 与 [generate.md](generate.md)。

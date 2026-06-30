@@ -102,13 +102,13 @@ MAGFuse generate_sequence_features_multi \
 
 ## 3. 生成 DNABERT 嵌入
 
-MAGFuse 在组成 / 丰度之外引入第三条模态：用 [DNABERT-S](https://github.com/MAGICS-LAB/DNABERT_S) 对 contig 序列做嵌入，再与组成、丰度一起送入多模态融合模型。该模态仅在短读长（`short_read`）训练路径上启用。
+MAGFuse 在组成 / 丰度之外引入第三条模态：用 [DNABERT-S](https://github.com/MAGICS-LAB/DNABERT_S) 对 contig 序列做嵌入，再与组成、丰度一起送入多模态融合模型。该模态是短读长（`short_read`）训练路径**默认且始终启用**的组成部分。长读长（`long_read`）路径不使用多模态，而是采用 DBSCAN 集成，属于不同算法。
 
 > DNABERT-S 预训练权重较大，已被 `.gitignore`，**不随仓库分发**。请自行从 <https://github.com/MAGICS-LAB/DNABERT_S> 获取权重，放到 `SemiBin/DNABERT-S/`，或在运行时用 `--dnabert-model` 指定路径。
 
-### 3.1 为什么要手动生成
+### 3.1 自动提取（含 split）
 
-`single_easy_bin` / `multi_easy_bin` 内置了 `--dnabert-model` 的自动提取路径，但它对 **split 半段有局限**：原始 fasta 里并没有 `h_1` / `h_2` 这些半段序列，自动路径无法为 split 生成对齐的嵌入。因此**推荐用 `generate_berts.py` 显式生成** whole 与 split 两份嵌入。
+`single_easy_bin` / `multi_easy_bin` 会自动提取 whole 与 split 两份嵌入：`h_1` / `h_2` 半段由父 contig 自动切半得到，whole 与 split 共享同一个 PCA basis，**无需手动**处理。`generate_berts.py` 则是离线 / 单独生成嵌入的等价工具，本节其余部分介绍它的用法。
 
 ### 3.2 关键约束：whole 与 split 共享同一个 PCA basis
 
@@ -154,15 +154,21 @@ python SemiBin/generate_berts.py -md /path/DNABERT-S \
 
 ### 3.5 相关命令行参数
 
-在 `single_easy_bin` / `multi_easy_bin` 中控制 DNABERT 与多模态训练：
+在 `single_easy_bin` / `multi_easy_bin` 中控制 DNABERT 嵌入：
 
 | 参数 | 默认值 | 说明 |
 | --- | --- | --- |
 | `--dnabert-model PATH` | 内置 `SemiBin/DNABERT-S` 目录 | DNABERT-S 模型路径 |
 | `--dnabert-python PATH` | `$SEMIBIN_DNABERT_PYTHON` 或当前解释器 | 运行 DNABERT 推理用的 Python |
-| `--disable-multimodal-training` | （关闭则启用多模态） | 关闭多模态，回退到标准自监督训练 |
 
-图融合 / 聚类相关参数（`single_easy_bin` / `multi_easy_bin` / `bin`）见 [usage.md](usage.md) 与 [subcommands.md](subcommands.md)。
+全局社区检测 / 聚类相关参数（`single_easy_bin` / `multi_easy_bin` / `bin`）：
+
+| 参数 | 默认值 | 说明 |
+| --- | --- | --- |
+| `--cluster-algorithm {leiden,infomap}` | `leiden` | 全局社区检测算法；`infomap` 仅作为可选项保留 |
+| `--cluster-resolution FLOAT` | `1.0` | Leiden 模块度分辨率；越大 bin 越多，越小 bin 越少 |
+
+图融合 / 聚类相关参数（`single_easy_bin` / `multi_easy_bin` / `bin`）见 [usage.md](usage.md) 与 [subcommands.md](subcommands.md)。MAGFuse 用 **Leiden** 做全局社区检测（模块度目标）。
 
 ---
 

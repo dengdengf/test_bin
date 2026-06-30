@@ -24,10 +24,10 @@
 
 ## 多模态相关特性
 
-MAGFuse 在标准自监督流程之外，提供以下能力（仅在此处罗列，详见 [methods](methods.md)）：
+MAGFuse 在**短读长**（`short_read`）流程中**默认且始终启用**多模态嵌入，提供以下能力（仅在此处罗列，详见 [methods](methods.md)）：
 
-- **多模态嵌入模型**（组成 / 丰度 / DNABERT 三分支 + 学习式门控融合 + 跨模态对齐损失）。仅在**短读长**（`short_read`）训练路径下启用，可用 `--disable-multimodal-training` 关闭、回退标准自监督。
-- **多视图相似度图融合聚类**：对 embedding / 组成 / 丰度 /（可选）DNABERT 各建 kNN 相似度图，加权融合后跑 Infomap 全局聚类。融合权重、核函数可配置，并在多样本（非 combined）下重新引入“共丰度 KL 散度”边权调制。
+- **多模态嵌入模型**（组成 / 丰度 / DNABERT 三分支 + 学习式门控融合 + 跨模态对齐损失）：是短读长训练路径的常规组成部分，无需手动开启。
+- **多视图相似度图融合聚类**：对 embedding / 组成 / 丰度 / DNABERT 各建 kNN 相似度图，加权融合后用 **Leiden** 做全局社区检测。融合权重、核函数可配置，并在多样本（非 combined）下重新引入“共丰度 KL 散度”边权调制。
 - **标记基因去污染重聚类**：在被判为污染的 bin 内做带种子的标签传播，仅当单拷贝标记基因冗余度下降时才接受拆分。
 
 相关命令行参数：
@@ -35,12 +35,13 @@ MAGFuse 在标准自监督流程之外，提供以下能力（仅在此处罗列
 | 参数 | 适用子命令 | 默认值 | 说明 |
 | --- | --- | --- | --- |
 | `--knn-kernel {median,local}` | `single_easy_bin` / `multi_easy_bin` / `bin` | `median` | kNN 相似度图核函数 |
-| `--fusion-weights EMB COMP ABUND` | 同上 | `0.60 0.25 0.15` | 非多模态时的融合权重 |
-| `--fusion-weights-multimodal EMB COMP ABUND DNA` | 同上 | `0.45 0.15 0.15 0.25` | 多模态（含 DNABERT）时的融合权重 |
+| `--fusion-weights EMB COMP ABUND` | 同上 | `0.60 0.25 0.15` | 基础融合权重（不含 DNABERT 分支时） |
+| `--fusion-weights-multimodal EMB COMP ABUND DNA` | 同上 | `0.45 0.15 0.15 0.25` | 含 DNABERT 分支时的融合权重 |
 | `--no-coabundance-kl` | 同上 | （默认开启 KL） | 关闭共丰度 KL 调制 |
+| `--cluster-algorithm {leiden,infomap}` | 同上 | `leiden` | 全局社区检测算法（`infomap` 仅作为可选项保留） |
+| `--cluster-resolution FLOAT` | 同上 | `1.0` | Leiden 模块度分辨率（越大 bin 越多、越小） |
 | `--dnabert-model PATH` | `single_easy_bin` / `multi_easy_bin` | 内置 `SemiBin/DNABERT-S` 目录 | DNABERT-S 权重路径 |
 | `--dnabert-python PATH` | 同上 | `$SEMIBIN_DNABERT_PYTHON` 或当前解释器 | 运行 DNABERT 推理的 Python 解释器 |
-| `--disable-multimodal-training` | 同上 | （默认开启多模态） | 关闭多模态，回退标准自监督 |
 
 ---
 
@@ -66,22 +67,11 @@ MAGFuse single_easy_bin \
 
 ### 2. 学习一个新模型（自监督）
 
-不使用内置模型，针对你自己的数据学习一个新模型。会更慢，但可能得到更好的结果。短读长下默认启用多模态训练路径：
+不使用内置模型，针对你自己的数据学习一个新模型。会更慢，但可能得到更好的结果。短读长下多模态训练路径默认且始终启用：
 
 ```bash
 MAGFuse single_easy_bin \
         --self-supervised \
-        -i S1.fa \
-        -b S1.sorted.bam \
-        -o output
-```
-
-如果你想关闭多模态、走标准自监督路径：
-
-```bash
-MAGFuse single_easy_bin \
-        --self-supervised \
-        --disable-multimodal-training \
         -i S1.fa \
         -b S1.sorted.bam \
         -o output
@@ -102,16 +92,15 @@ MAGFuse single_easy_bin \
         -o output
 ```
 
-> 注意：多模态训练仅在短读长路径启用，长读长路径不涉及多模态嵌入。
+> 注意：多模态嵌入是短读长路径的组成部分；长读长路径采用不同的 DBSCAN 集成算法，不涉及多模态嵌入。
 
 ### 调整图融合聚类参数
 
-聚类阶段的图融合行为可通过相关参数调整。例如改用 `local` 核、自定义非多模态融合权重、并关闭共丰度 KL 调制：
+聚类阶段的图融合行为可通过相关参数调整。例如改用 `local` 核、自定义融合权重、并关闭共丰度 KL 调制：
 
 ```bash
 MAGFuse single_easy_bin \
         --self-supervised \
-        --disable-multimodal-training \
         --knn-kernel local \
         --fusion-weights 0.70 0.20 0.10 \
         --no-coabundance-kl \
@@ -120,12 +109,23 @@ MAGFuse single_easy_bin \
         -o output
 ```
 
-启用多模态时，使用 `--fusion-weights-multimodal`（四个权重对应 EMB / COMP / ABUND / DNA）：
+含 DNABERT 分支时，使用 `--fusion-weights-multimodal`（四个权重对应 EMB / COMP / ABUND / DNA）：
 
 ```bash
 MAGFuse single_easy_bin \
         --self-supervised \
         --fusion-weights-multimodal 0.45 0.15 0.15 0.25 \
+        -i S1.fa \
+        -b S1.sorted.bam \
+        -o output
+```
+
+全局社区检测默认用 Leiden，可用 `--cluster-resolution` 调整 bin 粒度（也可用 `--cluster-algorithm infomap` 切换到 Infomap）：
+
+```bash
+MAGFuse single_easy_bin \
+        --self-supervised \
+        --cluster-resolution 1.2 \
         -i S1.fa \
         -b S1.sorted.bam \
         -o output
@@ -182,7 +182,7 @@ MAGFuse bin_short \
     -o S1_output
 ```
 
-`bin` / `bin_short` 同样接受 `--knn-kernel`、`--fusion-weights`、`--no-coabundance-kl` 等图融合参数。
+`bin` / `bin_short` 同样接受 `--knn-kernel`、`--fusion-weights`、`--no-coabundance-kl`、`--cluster-algorithm`、`--cluster-resolution` 等图融合参数。
 
 ---
 
@@ -248,20 +248,10 @@ MAGFuse concatenate_fasta \
 
 ### Easy 多样本分箱
 
-短读长（默认启用多模态训练）：
+短读长（多模态训练默认且始终启用）：
 
 ```bash
 MAGFuse multi_easy_bin \
-        -i concatenated.fa \
-        -b S1.sorted.bam S2.sorted.bam S3.sorted.bam S4.sorted.bam S5.sorted.bam \
-        -o multi_output
-```
-
-走标准路径（关闭多模态）：
-
-```bash
-MAGFuse multi_easy_bin \
-        --disable-multimodal-training \
         -i concatenated.fa \
         -b S1.sorted.bam S2.sorted.bam S3.sorted.bam S4.sorted.bam S5.sorted.bam \
         -o multi_output
@@ -339,7 +329,7 @@ MAGFuse train \
 
 ## 完整的 DNABERT 多模态流程
 
-DNABERT 分支需要预先生成 DNABERT-S 嵌入。整体流程为：**生成序列特征 → 用 `generate_berts.py` 产出 whole 与 split 两份嵌入 → 训练 + 分箱**。
+DNABERT 分支需要 DNABERT-S 嵌入。`single_easy_bin` / `multi_easy_bin` 会**自动提取**这些嵌入（含 split 半段，共享 PCA basis），无需手动操作；`generate_berts.py` 则是离线/单独生成嵌入的等价工具。整体流程为：**生成序列特征 →（自动提取 DNABERT 嵌入，或用 `generate_berts.py` 离线生成 whole 与 split 两份嵌入）→ 训练 + 分箱**。
 
 ### 前置：获取 DNABERT-S 权重
 
@@ -354,11 +344,11 @@ DNABERT-S 预训练权重较大，已被 gitignore，**不随仓库分发**。�
 MAGFuse generate_sequence_features_single -i S1.fa -b S1.sorted.bam -o output
 ```
 
-> split 的 contig 命名形如 `h_1` / `h_2`（见 `generate_kmer.py`）。原始 FASTA 中没有这些 split 半段，因此推荐用 `generate_berts.py` 显式生成 split 嵌入，而不是依赖 `single_easy_bin` / `multi_easy_bin` 内置的自动提取（其对 split 半段有局限）。
+> split 的 contig 命名形如 `h_1` / `h_2`（见 `generate_kmer.py`，由父 contig 自动切半）。`single_easy_bin` / `multi_easy_bin` 的内置自动提取会自动处理 whole 与 split 半段（`h_1`/`h_2`）并共享同一 PCA basis，无需手动。若希望离线/单独生成嵌入，可改用 `generate_berts.py`（等价工具）。
 
-### 步骤 2：用 `generate_berts.py` 生成 whole + split 嵌入
+### 步骤 2（可选）：用 `generate_berts.py` 离线生成 whole + split 嵌入
 
-需要 `whole.fasta`（整条 contig）与 `split.fasta`（split 半段）两份输入。whole 与 split **共享同一个 PCA basis**（在 whole 上 fit，对 split 用 transform）：
+如选择离线生成，需要 `whole.fasta`（整条 contig）与 `split.fasta`（split 半段）两份输入。whole 与 split **共享同一个 PCA basis**（在 whole 上 fit，对 split 用 transform）：
 
 ```bash
 python SemiBin/generate_berts.py -md /path/DNABERT-S \
@@ -374,7 +364,7 @@ python SemiBin/generate_berts.py -md /path/DNABERT-S \
 
 ### 步骤 3：训练 + 分箱
 
-嵌入就位后，正常运行短读长多模态流程即可（默认启用多模态，会自动加载同目录下的 DNABERT 嵌入）：
+正常运行短读长多模态流程即可（多模态默认且始终启用，会自动提取或加载同目录下的 DNABERT 嵌入）：
 
 ```bash
 MAGFuse single_easy_bin \

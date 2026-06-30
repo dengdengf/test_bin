@@ -8,8 +8,8 @@
 
 | # | 模块 | 设计 |
 |---|------|------|
-| 1 | 多模态嵌入模型<br>(`SemiBin/multimodal_model.py`) | 组成 / 丰度 / DNABERT 三分支编码 + 学习式 softmax 门控融合 + 跨模态对齐损失（向 DNABERT 单向对齐，使用 stop-gradient/detach）。**仅短读长 (`short_read`) 训练路径启用。** |
-| 2 | 多视图相似度图融合聚类<br>(`SemiBin/graph_fusion.py` + `cluster.py`) | 对 embedding / 组成 / 丰度 /（可选）DNABERT 各建 kNN 相似度图，加权融合后跑 Infomap 全局聚类；融合权重与核函数可配置。在多样本（非 combined）下引入"共丰度 KL 散度"边权调制（逐边计算，省内存）。 |
+| 1 | 多模态嵌入模型<br>(`SemiBin/multimodal_model.py`) | 组成 / 丰度 / DNABERT 三分支编码 + 学习式 softmax 门控融合 + 跨模态对齐损失（向 DNABERT 单向对齐，使用 stop-gradient/detach）。**短读长 (`short_read`) 训练路径默认且始终启用。** |
+| 2 | 多视图相似度图融合聚类<br>(`SemiBin/graph_fusion.py` + `cluster.py`) | 对 embedding / 组成 / 丰度 / DNABERT 各建 kNN 相似度图，加权融合后用 **Leiden** 做全局社区检测；融合权重、核函数与聚类算法/分辨率可配置。在多样本（非 combined）下引入"共丰度 KL 散度"边权调制（逐边计算，省内存）。 |
 | 3 | 标记基因去污染重聚类<br>(`SemiBin/marker_refinement.py`) | 在被判为污染的 bin 内做"带种子的标签传播"(personalized-PageRank，α 随 bin 大小自适应、按 contig 长度加权扩散、用 top-2 置信度边际把边界 contig 留作未分配)；**仅当单拷贝标记基因冗余度下降时才接受拆分。** |
 | 4 | DNABERT 特征提取<br>(`SemiBin/generate_berts.py`) | 批量推理 + `attention_mask` 掩码均值池化；`whole` 与 `split` **共享同一个 PCA basis**（在 `whole` 上 fit、对 `split` 用 transform）。 |
 
@@ -21,7 +21,6 @@ DNABERT / 训练（`single_easy_bin`、`multi_easy_bin`）：
 |------|--------|------|
 | `--dnabert-model PATH` | 内置 `SemiBin/DNABERT-S` 目录 | DNABERT-S 模型路径 |
 | `--dnabert-python PATH` | `$SEMIBIN_DNABERT_PYTHON` 或当前解释器 | 运行 DNABERT 推理的 Python 解释器 |
-| `--disable-multimodal-training` | （关闭）| 关闭多模态，回退标准自监督训练 |
 
 图融合 / 聚类（`single_easy_bin`、`multi_easy_bin`、`bin`）：
 
@@ -31,6 +30,8 @@ DNABERT / 训练（`single_easy_bin`、`multi_easy_bin`）：
 | `--fusion-weights EMB COMP ABUND` | `0.60 0.25 0.15` | 无 DNABERT 时的融合权重 |
 | `--fusion-weights-multimodal EMB COMP ABUND DNA` | `0.45 0.15 0.15 0.25` | 有 DNABERT 时的融合权重 |
 | `--no-coabundance-kl` | （开启）| 关闭共丰度 KL 调制 |
+| `--cluster-algorithm {leiden,infomap}` | `leiden` | 全局社区检测算法（infomap 仅作为可选项保留）|
+| `--cluster-resolution FLOAT` | `1.0` | Leiden 模块度分辨率（越大 bin 越多、越小）|
 
 ### 关键要点
 
@@ -42,8 +43,8 @@ DNABERT / 训练（`single_easy_bin`、`multi_easy_bin`）：
 ### DNABERT 用法要点
 
 - DNABERT-S 预训练权重较大，已 `gitignore`，**不随仓库分发**；需单独获取后放到 `SemiBin/DNABERT-S/`，或用 `--dnabert-model` 指定。来源：<https://github.com/MAGICS-LAB/DNABERT_S>。
-- DNABERT 嵌入用 `generate_berts.py` 生成，需 `whole` + `split` 两份（split 名称形如 `h_1`/`h_2`，见 `generate_kmer.py`），二者共享 PCA basis。
-- 推荐命令：
+- DNABERT 嵌入需 `whole` + `split` 两份（split 名称形如 `h_1`/`h_2`，见 `generate_kmer.py`），二者共享 PCA basis。`single_easy_bin` / `multi_easy_bin` 会**自动提取**（含 split，共享 PCA basis），`generate_berts.py` 是离线/单独生成嵌入的等价工具。
+- `generate_berts.py` 用法：
 
 ```bash
 python SemiBin/generate_berts.py -md /path/DNABERT-S \
@@ -52,7 +53,7 @@ python SemiBin/generate_berts.py -md /path/DNABERT-S \
 ```
 
 - 输出文件名必须是 `dnabert_embedding.npy` / `dnabert_split_embedding.npy`，放在 `data.csv` 同目录；fasta 行序须与 `data.csv` / `data_split.csv` 一致（`load_multimodal_embeddings` 会逐行校验）。
-- `single_easy_bin` / `multi_easy_bin` 内置的 `--dnabert-model` 自动提取路径，对 split 半段有局限（原始 fasta 里没有 `h_1`/`h_2`），推荐用 `generate_berts.py` 显式生成。
+- `single_easy_bin` / `multi_easy_bin` 会自动提取 whole 与 split（`h_1`/`h_2` 由父 contig 自动切半），并共享 PCA basis，无需手动。
 
 更多端到端用法见 [usage](usage)、[generate](generate)、[aemb](aemb)。
 
@@ -60,7 +61,7 @@ python SemiBin/generate_berts.py -md /path/DNABERT-S \
 
 - 输入：contigs（组装结果）+ BAM/CRAM（或 strobealign-aemb 丰度）。
 - `--environment` 预训练模型：`human_gut` / `dog_gut` / `ocean` / `soil` / `cat_gut` / `human_oral` / `mouse_gut` / `pig_gut` / `built_environment` / `wastewater` / `chicken_caecum` / `global`。
-- 长读长：`--sequencing-type=long_read` 或 `bin_long`，沿用 DBSCAN 集成算法。
+- 长读长：`--sequencing-type=long_read` 或 `bin_long`，沿用 DBSCAN 集成算法（不使用多模态，属于不同算法）。
 - k-mer 组成 = 136 维 canonical 四核苷酸；丰度归一化逻辑未改。
 - 外部依赖：bedtools、hmmer、samtools（可选 mmseqs2、prodigal）。支持 Python 3.7–3.13。
 

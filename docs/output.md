@@ -21,7 +21,7 @@
 
 | 文件 | 说明 |
 | --- | --- |
-| `model.pt` | 训练好的深度学习模型。短读长 (`short_read`) 路径下默认为多模态嵌入模型（组成 / 丰度 / DNABERT 三分支 + 门控融合 + 跨模态对齐），若加 `--disable-multimodal-training` 则回退为标准自监督模型。 |
+| `model.pt` | 训练好的深度学习模型。短读长 (`short_read`) 路径下为多模态嵌入模型（组成 / 丰度 / DNABERT 三分支 + 门控融合 + 跨模态对齐），始终默认启用。 |
 | `data.csv` | 训练所用的 whole（完整 contig）特征：136 维 canonical 四核苷酸 k-mer 组成 + 归一化丰度。 |
 | `data_split.csv` | 把 contig 切成两半（命名形如 `h_1` / `h_2`，见 `generate_kmer.py`）后的 split 特征，用于自监督约束。 |
 | `*_data_cov.csv` / `*_data_split_cov.csv` | 从 depth（BAM/CRAM 或 strobealign-aemb）生成的覆盖度/丰度数据。 |
@@ -29,16 +29,16 @@
 
 ### DNABERT 特征文件（多模态路径）
 
-当启用多模态（短读长且未加 `--disable-multimodal-training`）时，需要 DNABERT 嵌入，存放在与 `data.csv` 同一目录下：
+短读长路径默认且始终启用多模态，需要 DNABERT 嵌入，存放在与 `data.csv` 同一目录下：
 
 | 文件 | 说明 |
 | --- | --- |
 | `dnabert_embedding.npy` | whole contig 的 DNABERT 嵌入（经掩码均值池化 + PCA 降维）。行序须与 `data.csv` 完全一致。 |
 | `dnabert_split_embedding.npy` | split 半段 (`h_1`/`h_2`) 的 DNABERT 嵌入。行序须与 `data_split.csv` 完全一致；与 whole 共享同一个 PCA basis（在 whole 上 fit、对 split 用 transform）。 |
 
-> 文件名必须严格为 `dnabert_embedding.npy` / `dnabert_split_embedding.npy`，且 fasta 行序须与 `data.csv` / `data_split.csv` 逐行对齐 —— `load_multimodal_embeddings` 会逐行校验。生成方法（含 `generate_berts.py` 推荐命令）见 [DNABERT/多模态特征](aemb.md)。
+> 文件名必须严格为 `dnabert_embedding.npy` / `dnabert_split_embedding.npy`，且 fasta 行序须与 `data.csv` / `data_split.csv` 逐行对齐 —— `load_multimodal_embeddings` 会逐行校验。`single_easy_bin` / `multi_easy_bin` 会自动提取 whole 与 split（`h_1`/`h_2` 由父 contig 自动切半），并共享 PCA basis，无需手动；`generate_berts.py` 是离线/单独生成嵌入的等价工具。生成方法见 [DNABERT/多模态特征](aemb.md)。
 
-这两个嵌入文件可由 `SemiBin/generate_berts.py` 显式生成（推荐），命令示例：
+这两个嵌入文件也可由 `SemiBin/generate_berts.py` 离线/单独显式生成，命令示例：
 
 ```bash
 python SemiBin/generate_berts.py -md /path/DNABERT-S \
@@ -65,6 +65,17 @@ DNABERT-S 预训练权重较大，已被 gitignore、不随仓库分发，需单
 | `bins/` | 来自所有样本的重建 bin 汇总。 |
 | `samples/*.fasta` | 由输入的合并 contig（`concatenate_fasta` 产物）拆分出的每个样本的 contig fasta。 |
 | `samples/*_data_cov.csv` | 每个样本的覆盖度数据，含义同单样本路径。 |
-| `samples/{sample-name}/` | 每个样本各自的输出子目录，结构与单样本/共组装分箱一致（包含该样本的 `model.pt`、`data.csv`、`data_split.csv`、`output_bins/`、`bins_info.tsv`、`contig_bins.tsv` 等；启用多模态时还有 `dnabert_embedding.npy` / `dnabert_split_embedding.npy`）。 |
+| `samples/{sample-name}/` | 每个样本各自的输出子目录，结构与单样本/共组装分箱一致（包含该样本的 `model.pt`、`data.csv`、`data_split.csv`、`output_bins/`、`bins_info.tsv`、`contig_bins.tsv`，以及 `dnabert_embedding.npy` / `dnabert_split_embedding.npy`）。 |
 
 > 多样本（非 combined）路径下，图融合聚类会额外引入「共丰度 KL 散度」边权调制（逐边计算，省内存）；这只影响聚类过程，不会新增持久化输出文件。可用 `--no-coabundance-kl` 关闭。融合权重/核函数等聚类选项见 [使用](usage.md)。
+
+## 全局社区检测与聚类参数
+
+图融合后用 **Leiden** 做全局社区检测（模块度目标）。相关命令行参数（作用于 `single_easy_bin` / `multi_easy_bin` / `bin`）：
+
+| 参数 | 说明 |
+| --- | --- |
+| `--cluster-algorithm {leiden,infomap}` | 全局社区检测算法，默认 `leiden`；`infomap` 仅作为可选项保留。 |
+| `--cluster-resolution FLOAT` | Leiden 模块度分辨率，默认 `1.0`；越大 bin 越多、越小 bin 越少。 |
+| `--knn-kernel` / `--fusion-weights` / `--fusion-weights-multimodal` | 图融合的核函数与各模态融合权重。 |
+| `--no-coabundance-kl` | 关闭多样本路径下的共丰度 KL 散度边权调制。 |

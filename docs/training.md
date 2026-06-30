@@ -63,32 +63,22 @@ MAGFuse train \
 
 ## 多模态训练
 
-多模态训练是 MAGFuse 的核心能力之一。它在标准自监督训练的基础上，额外引入 **DNABERT 语言模型嵌入** 作为第三个模态，与「组成」「丰度」两个模态共同学习（见 `SemiBin/multimodal_model.py`）。
+多模态训练是 MAGFuse 短读长流程**默认且始终启用**的核心组成部分。它在自监督训练的基础上，额外引入 **DNABERT 语言模型嵌入** 作为第三个模态，与「组成」「丰度」两个模态共同学习（见 `SemiBin/multimodal_model.py`）。
 
-### 启用条件
+### DNABERT 嵌入与自动提取
 
-多模态训练**仅在短读长（short_read）训练路径上启用**，并需要 DNABERT 嵌入文件预先就位：
+多模态训练运行在短读长（short_read）训练路径上，依赖 DNABERT 嵌入：
 
-- DNABERT 嵌入由 `SemiBin/generate_berts.py` 生成，需要 `whole` 与 `split` 两份，二者共享同一个 PCA basis（在 whole 上 `fit`、对 split 用 `transform`）。
-- 输出文件名必须为 `dnabert_embedding.npy` 与 `dnabert_split_embedding.npy`，放在与 `data.csv` 相同的目录下；fasta 的行序必须与 `data.csv` / `data_split.csv` 一致（`load_multimodal_embeddings` 会逐行校验）。
+- 在 `single_easy_bin` / `multi_easy_bin` 的短读长流程中，DNABERT 特征提取会**自动处理 split 半段**：自动提取 `whole` 与 `split` 两份嵌入（`h_1`/`h_2` 由父 contig 自动切半），并共享同一个 PCA basis（在 whole 上 `fit`、对 split 用 `transform`），无需手动操作。
+- 输出文件名为 `dnabert_embedding.npy` 与 `dnabert_split_embedding.npy`，放在与 `data.csv` 相同的目录下；fasta 的行序必须与 `data.csv` / `data_split.csv` 一致（`load_multimodal_embeddings` 会逐行校验）。
 - DNABERT-S 预训练权重较大，已被 gitignore、不随仓库分发，需单独获取后放到 `SemiBin/DNABERT-S/`，或用 `--dnabert-model` 指定路径。权重来源：[DNABERT_S](https://github.com/MAGICS-LAB/DNABERT_S)。
 
-DNABERT 嵌入的详细生成方法见 [generate.md](generate.md) 与 [usage.md](usage.md)。推荐显式生成命令：
+DNABERT 嵌入的详细说明见 [generate.md](generate.md) 与 [usage.md](usage.md)。`SemiBin/generate_berts.py` 是离线/单独生成嵌入的等价工具，可用于自定义流程：
 
 ```bash
 python SemiBin/generate_berts.py -md /path/DNABERT-S \
     -fd whole.fasta  -nd output/dnabert_contig_names.txt       -dd output/dnabert_embedding.npy \
     -sfd split.fasta -snd output/dnabert_split_contig_names.txt -sdd output/dnabert_split_embedding.npy
-```
-
-### 自动检测与关闭
-
-在 `single_easy_bin` / `multi_easy_bin` 的短读长流程中，若检测到上述 DNABERT 嵌入文件就位，会**自动启用多模态模型**进行训练，无需额外开关。
-
-如需关闭多模态、回退到标准自监督训练，使用：
-
-```bash
---disable-multimodal-training
 ```
 
 相关参数（用于 `single_easy_bin` / `multi_easy_bin`）：
@@ -97,9 +87,6 @@ python SemiBin/generate_berts.py -md /path/DNABERT-S \
 | --- | --- | --- |
 | `--dnabert-model PATH` | 内置 `SemiBin/DNABERT-S` 目录 | DNABERT-S 权重路径 |
 | `--dnabert-python PATH` | `$SEMIBIN_DNABERT_PYTHON` 或当前解释器 | 运行 DNABERT 推理的 Python 解释器 |
-| `--disable-multimodal-training` | 关闭多模态、回退标准自监督 |
-
-> 提示：`single_easy_bin` / `multi_easy_bin` 内置的 DNABERT 自动提取路径对 `split` 半段有局限（原始 fasta 中没有 `h_1`/`h_2` 这类切分名称，见 `generate_kmer.py`），因此推荐用上面的 `generate_berts.py` 显式生成两份嵌入。
 
 ### 模型结构简述
 
@@ -121,4 +108,11 @@ flowchart LR
 - **门控融合**：三个分支的表示通过一个学习式 softmax 门控加权融合，模型自行学习各模态的相对权重。
 - **跨模态对齐损失**：组成 / 丰度分支向 DNABERT 分支做**单向对齐**，对 DNABERT 一侧使用 stop-gradient（`detach`），即只让组成 / 丰度去靠拢 DNABERT，而不反向扰动 DNABERT 表示。
 
-训练完成后得到的模型与标准自监督模型用法一致，可直接传入后续的 `bin` 步骤。聚类阶段还可结合多视图图融合（见 [usage.md](usage.md) 中的 `--fusion-weights-multimodal` 等参数）。
+训练完成后得到的模型可直接传入后续的 `bin` 步骤。聚类阶段用 **Leiden** 做全局社区检测，并可结合多视图图融合（见 [usage.md](usage.md) 中的 `--fusion-weights-multimodal` 等参数）。
+
+聚类 / 图融合相关参数（用于 `single_easy_bin` / `multi_easy_bin` / `bin`）：
+
+| 参数 | 默认值 | 说明 |
+| --- | --- | --- |
+| `--cluster-algorithm {leiden,infomap}` | `leiden` | 全局社区检测算法；infomap 仅作为可选项保留 |
+| `--cluster-resolution FLOAT` | `1.0` | Leiden 模块度分辨率；越大 bin 越多、越小 bin 越少 |

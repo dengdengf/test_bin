@@ -10,10 +10,10 @@ MAGFuse 的四点核心能力（仅描述以下能力）：
 
 | 特性 | 说明 | 实现 |
 | --- | --- | --- |
-| 多模态嵌入模型 | 组成 / 丰度 / DNABERT 三分支编码 + 学习式 softmax 门控融合 + 跨模态对齐损失（向 DNABERT 单向对齐，使用 stop-gradient/detach）。仅短读长（`short_read`）训练路径启用。 | `SemiBin/multimodal_model.py` |
-| 多视图相似度图融合聚类 | 对 embedding/组成/丰度/(可选)DNABERT 各建 kNN 相似度图，加权融合后跑 Infomap 全局聚类；融合权重与核函数可配置；多样本（非 combined）下逐边重新引入共丰度 KL 散度边权调制（省内存）。 | `SemiBin/graph_fusion.py` + `cluster.py` |
+| 多模态嵌入模型 | 组成 / 丰度 / DNABERT 三分支编码 + 学习式 softmax 门控融合 + 跨模态对齐损失（向 DNABERT 单向对齐，使用 stop-gradient/detach）。短读长（`short_read`）训练路径默认且始终启用。 | `SemiBin/multimodal_model.py` |
+| 多视图相似度图融合聚类 | 对 embedding/组成/丰度/DNABERT 各建 kNN 相似度图，加权融合后用 Leiden 做全局社区检测；融合权重与核函数可配置；多样本（非 combined）下逐边重新引入共丰度 KL 散度边权调制（省内存）。 | `SemiBin/graph_fusion.py` + `cluster.py` |
 | 标记基因去污染重聚类 | 在被判为污染的 bin 内做带种子的标签传播（personalized-PageRank，α 随 bin 大小自适应、按 contig 长度加权扩散、用 top-2 置信度边际把边界 contig 留作未分配）；仅当单拷贝标记基因冗余度下降时才接受拆分。 | `SemiBin/marker_refinement.py` |
-| DNABERT 特征提取 | 批量推理 + attention_mask 掩码均值池化；whole 与 split 共享同一个 PCA basis（在 whole 上 fit、对 split 用 transform）。 | `SemiBin/generate_berts.py` |
+| DNABERT 特征提取 | 批量推理 + attention_mask 掩码均值池化；`single_easy_bin` / `multi_easy_bin` 自动提取 whole 与 split（`h_1`/`h_2` 由父 contig 自动切半），并共享同一个 PCA basis（在 whole 上 fit、对 split 用 transform），无需手动；`generate_berts.py` 是离线/单独生成嵌入的等价工具。 | `SemiBin/generate_berts.py` |
 
 输入、预训练模型、长读长算法、k-mer 组成与丰度归一化等的详细说明见 [usage](usage.md) 与 [核心方法与特性](methods.md)。
 
@@ -23,9 +23,9 @@ MAGFuse 的四点核心能力（仅描述以下能力）：
 flowchart TD
     A[contigs（组装结果）] --> B[生成序列特征<br/>组成 + 丰度]
     C[BAM/CRAM 或 strobealign-aemb 丰度] --> B
-    D[（可选）DNABERT 嵌入<br/>generate_berts.py] --> E
+    D[DNABERT 嵌入提取<br/>含 split，共享 PCA basis] --> E
     B --> E[多模态嵌入模型<br/>multimodal_model.py]
-    E --> F[多视图相似度图融合 + Infomap 聚类<br/>graph_fusion.py]
+    E --> F[多视图相似度图融合 + Leiden 聚类<br/>graph_fusion.py]
     F --> G[标记基因去污染重聚类<br/>marker_refinement.py]
     G --> H[输出 bins]
 ```
@@ -44,7 +44,7 @@ MAGFuse single_easy_bin \
 
 可选的 `--environment` 预训练模型：`human_gut`、`dog_gut`、`ocean`、`soil`、`cat_gut`、`human_oral`、`mouse_gut`、`pig_gut`、`built_environment`、`wastewater`、`chicken_caecum`、`global`。
 
-如需启用 DNABERT 与图融合相关能力，参见 [aemb / DNABERT 用法](aemb.md) 与 [子命令参数](subcommands.md)。安装好后即可使用 `MAGFuse` 命令。
+DNABERT 与图融合相关能力为默认流程的一部分，更多用法参见 [aemb / DNABERT 用法](aemb.md) 与 [子命令参数](subcommands.md)。安装好后即可使用 `MAGFuse` 命令。
 
 ## 文档导航
 

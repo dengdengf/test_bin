@@ -23,7 +23,7 @@
 | 模块 | MAGFuse 的设计 |
 |---|---|
 | **多模态嵌入模型** `multimodal_model.py` | 组成 / 丰度 / DNABERT 三分支编码 + **学习式 softmax 门控融合** + **跨模态对齐损失**(向 DNABERT 单向对齐,stop-gradient) |
-| **多视图图融合聚类** `graph_fusion.py` + `cluster.py` | 对 embedding / 组成 / 丰度 /(可选)DNABERT 各建 kNN 相似度图,**加权融合**后跑 Infomap 全局聚类;融合权重与核函数可配置,多样本下叠加**共丰度 KL 散度**边权调制 |
+| **多视图图融合聚类** `graph_fusion.py` + `cluster.py` | 对 embedding / 组成 / 丰度 / DNABERT 各建 kNN 相似度图,**加权融合**后用 **Leiden** 做全局社区检测;融合权重、核函数与分辨率可配置,多样本下叠加**共丰度 KL 散度**边权调制 |
 | **去污染重聚类** `marker_refinement.py` | 在污染 bin 内做**带种子的标签传播**(personalized-PageRank;α 随 bin 大小自适应、按 contig 长度加权扩散、用置信度边际剔除边界 contig),仅当**标记基因冗余度下降**才接受拆分 |
 | **DNABERT 特征提取** `generate_berts.py` | 批量推理 + 掩码均值池化;whole 与 split **共享同一个 PCA basis** |
 
@@ -31,14 +31,11 @@
 
 ```mermaid
 flowchart TD
-    A[contig.fa + BAM/abundance] --> B[generate_sequence_features<br/>k-mer 组成 + 丰度<br/>data.csv / data_split.csv]
-    B --> C{是否启用 DNABERT?}
-    C -- 是 --> D[generate_berts.py<br/>DNABERT-S 嵌入<br/>whole+split 共享 PCA]
-    C -- 否 --> E[标准自监督训练]
+    A[contig.fa + BAM/abundance] --> B[generate_sequence_features<br/>k-mer 组成 + 丰度]
+    B --> D[DNABERT-S 嵌入<br/>whole+split 共享 PCA]
     D --> F[多模态对比训练<br/>门控融合 + 对齐损失]
-    E --> G[embedding]
-    F --> G
-    G --> H[多视图图融合 + 共丰度 KL<br/>→ Infomap 全局聚类]
+    F --> G[embedding]
+    G --> H[多视图图融合 + 共丰度 KL<br/>→ Leiden 全局社区检测]
     H --> I[标记基因去污染重聚类<br/>标签传播 + 冗余度门控]
     I --> J[output_bins/]
 ```
@@ -75,20 +72,21 @@ pip install "transformers>=4.30" biopython tqdm
 
 ## 快速开始
 
+> 短读长流程默认启用多模态(DNABERT)路径,需要 DNABERT-S 模型(见[安装](#安装))与 `transformers`;DNABERT 特征会在流程内自动提取。
+
 单样本分箱:
 
 ```bash
 MAGFuse single_easy_bin \
     -i contig.fa \
     -b sample.sorted.bam \
-    -o output \
-    --disable-multimodal-training      # 不用 DNABERT,走标准自监督
+    -o output
 ```
 
 多样本分箱(contig 名形如 `S1:contig_1`):
 
 ```bash
-MAGFuse multi_easy_bin -i concatenated.fa -b *.sorted.bam -o output --disable-multimodal-training
+MAGFuse multi_easy_bin -i concatenated.fa -b *.sorted.bam -o output
 ```
 
 长读长:
@@ -108,11 +106,13 @@ MAGFuse single_easy_bin -i contig.fa -b sample.sorted.bam -o output \
 
 ## DNABERT 多模态用法
 
-DNABERT 嵌入由 `generate_berts.py` 产生。它需要 **whole** 与 **split** 两份序列:
+短读长分箱流程会**自动**提取 DNABERT 嵌入(`single_easy_bin` / `multi_easy_bin` 内置该步骤)。它处理 **whole** 与 **split** 两份序列:
 - whole = 与 `data.csv` 对应的原始 contig;
-- split = 与 `data_split.csv` 对应的半段序列(名称形如 `h_1` / `h_2`,见 `generate_kmer.py`)。
+- split = 与 `data_split.csv` 对应的半段序列(名称形如 `h_1` / `h_2`,见 `generate_kmer.py`;流程会自动从父 contig 切半得到)。
 
-二者必须**共享同一个 PCA basis**(否则对比学习不可比),本脚本通过"在 whole 上 `fit`、对 split 用 `transform`"保证这一点。
+二者必须**共享同一个 PCA basis**(否则对比学习不可比),流程通过"在 whole 上 `fit`、对 split 用 `transform`"保证这一点。
+
+若需**离线/单独**生成嵌入(例如复用到多次分箱),可用等价的 `generate_berts.py`:
 
 ```bash
 python SemiBin/generate_berts.py \
@@ -128,7 +128,7 @@ python SemiBin/generate_berts.py \
 
 嵌入就位后,训练阶段会在短读长模式下自动检测并启用多模态模型(`is_multimodal`),聚类阶段把 DNABERT 作为第 4 路视图加入图融合(默认权重 `0.45/0.15/0.15/0.25`,可用 `--fusion-weights-multimodal` 调整)。
 
-> 注:`single_easy_bin` / `multi_easy_bin` 内置了一条自动调用 DNABERT 提取的便捷路径(`--dnabert-model`),但它从原始 contig fasta 读序列,无法找到 `h_1/h_2` 半段。**推荐用上面的 `generate_berts.py` 显式生成嵌入**。
+> 说明:`single_easy_bin` / `multi_easy_bin` 会自动完成 DNABERT 提取(`--dnabert-model` 指定模型路径,默认用内置模型),whole 与 split 半段都会处理并共享 PCA basis,无需手动操作。上面的 `generate_berts.py` 是离线/单独生成嵌入的等价工具。
 
 ## 命令行参数
 
@@ -138,7 +138,6 @@ DNABERT / 训练(作用于 `single_easy_bin`、`multi_easy_bin`):
 |---|---|---|
 | `--dnabert-model PATH` | DNABERT 模型目录 | 内置 `SemiBin/DNABERT-S` |
 | `--dnabert-python PATH` | 用于 DNABERT 提取的 Python 解释器(可用 `$SEMIBIN_DNABERT_PYTHON`) | 当前解释器 |
-| `--disable-multimodal-training` | 关闭多模态训练,回退标准自监督 | 关 |
 
 图融合 / 聚类(作用于 `single_easy_bin`、`multi_easy_bin`、`bin`):
 
@@ -148,6 +147,8 @@ DNABERT / 训练(作用于 `single_easy_bin`、`multi_easy_bin`):
 | `--fusion-weights EMB COMP ABUND` | 无 DNABERT 时三视图融合权重 | `0.60 0.25 0.15` |
 | `--fusion-weights-multimodal EMB COMP ABUND DNA` | 多模态四视图融合权重 | `0.45 0.15 0.15 0.25` |
 | `--no-coabundance-kl` | 关闭多样本共丰度 KL 调制 | 关(即默认启用 KL) |
+| `--cluster-algorithm {leiden,infomap}` | 全局社区检测算法 | `leiden` |
+| `--cluster-resolution FLOAT` | Leiden 模块度分辨率(越大 bin 越多、越小) | `1.0` |
 
 `generate_berts.py` 参数:`-md` 模型目录;`-fd/-nd/-dd` whole 的 fasta/names/npy;`-sfd/-snd/-sdd`(可选)split 的 fasta/names/npy;`--batch_size`(默认 8)、`--max_length`(默认 5000)、`--target_dim`(默认 128)。
 

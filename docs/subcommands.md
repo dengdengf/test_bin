@@ -32,19 +32,20 @@ MAGFuse 采用**子命令**式接口。大多数场景只需 `single_easy_bin` �
 
 #### 多模态 / DNABERT 训练参数
 
-下列参数控制多模态嵌入与 DNABERT 特征分支，仅在短读长训练路径有效。多模态嵌入模型的结构见 `SemiBin/multimodal_model.py`（组成 / 丰度 / DNABERT 三分支编码 + 学习式 softmax 门控融合 + 向 DNABERT 单向对齐的跨模态对齐损失，对齐使用 stop-gradient/detach）。
+短读长训练路径**默认且始终启用** DNABERT 多模态嵌入，它是 MAGFuse 短读长流程的核心组成部分。下列参数控制多模态嵌入与 DNABERT 特征分支，仅在短读长训练路径有效。多模态嵌入模型的结构见 `SemiBin/multimodal_model.py`（组成 / 丰度 / DNABERT 三分支编码 + 学习式 softmax 门控融合 + 向 DNABERT 单向对齐的跨模态对齐损失，对齐使用 stop-gradient/detach）。
 
 * `--dnabert-model PATH`：DNABERT-S 模型目录（默认：内置 `SemiBin/DNABERT-S` 目录）。预训练权重较大，已 gitignore，不随仓库分发，需单独获取放到该目录或用本参数指定。权重来源见下文“DNABERT 用法要点”。
 * `--dnabert-python PATH`：用于运行 DNABERT 推理的 Python 解释器（默认：环境变量 `$SEMIBIN_DNABERT_PYTHON`，否则使用当前解释器）。
-* `--disable-multimodal-training`：关闭多模态训练，回退到标准的自监督训练路径。
 
-> 说明：`single_easy_bin` 内置的 `--dnabert-model` 会自动提取 DNABERT 嵌入，但对 split 半段存在局限（原始 fasta 中没有 `h_1`/`h_2` 这样的 split 名称）。需要 split 嵌入时，推荐用 `SemiBin/generate_berts.py` 显式生成，见下文。
+> 说明：`single_easy_bin` 内置的 `--dnabert-model` 会自动提取 DNABERT 嵌入，并自动处理 split 半段：`single_easy_bin` / `multi_easy_bin` 会自动提取 whole 与 split（`h_1`/`h_2` 由父 contig 自动切半），并共享 PCA basis，无需手动操作。`SemiBin/generate_berts.py` 是离线/单独生成嵌入的等价工具，见下文。
 
 #### 图融合 / 聚类参数
 
-下列参数控制多视图相似度图融合聚类（`SemiBin/graph_fusion.py` 与 `SemiBin/cluster.py`）。对 embedding / 组成 / 丰度 /（可选）DNABERT 各建一张 kNN 相似度图，按权重融合后跑 Infomap 进行全局聚类。
+下列参数控制多视图相似度图融合聚类（`SemiBin/graph_fusion.py` 与 `SemiBin/cluster.py`）。对 embedding / 组成 / 丰度 / DNABERT 各建一张 kNN 相似度图，按权重融合后用 **Leiden** 做全局社区检测。
 
 * `--knn-kernel {median,local}`：kNN 相似度图所用的核函数（默认 `median`）。
+* `--cluster-algorithm {leiden,infomap}`：全局社区检测算法（默认 `leiden`；`infomap` 仅作为可选项保留）。
+* `--cluster-resolution FLOAT`：Leiden 模块度分辨率（默认 `1.0`；越大 bin 越多、越小 bin 越少）。
 * `--fusion-weights EMB COMP ABUND`：未启用 DNABERT 时的三路融合权重（默认 `0.60 0.25 0.15`，依次对应 embedding / 组成 / 丰度）。
 * `--fusion-weights-multimodal EMB COMP ABUND DNA`：启用 DNABERT 时的四路融合权重（默认 `0.45 0.15 0.15 0.25`，依次对应 embedding / 组成 / 丰度 / DNABERT）。
 * `--no-coabundance-kl`：关闭“共丰度 KL 散度”边权调制。默认在多样本（非 combined）场景下会逐边计算共丰度 KL 散度对融合图的边权进行调制（逐边计算以节省内存）。
@@ -107,8 +108,8 @@ MAGFuse 采用**子命令**式接口。大多数场景只需 `single_easy_bin` �
 
 * `-s/--separator`：多样本分箱时用于分隔样本名与 contig 名的字符（默认 `:`）。
 * `--self-supervised` 或 `--semi-supervised`：指定训练算法，同 `single_easy_bin`。
-* 多模态 / DNABERT 训练参数 `--dnabert-model`、`--dnabert-python`、`--disable-multimodal-training`，含义同 `single_easy_bin`。
-* 图融合 / 聚类参数 `--knn-kernel`、`--fusion-weights`、`--fusion-weights-multimodal`、`--no-coabundance-kl`，含义同 `single_easy_bin`。注意：共丰度 KL 散度调制在多样本（非 combined）场景下默认启用，`--no-coabundance-kl` 可将其关闭。
+* 多模态 / DNABERT 训练参数 `--dnabert-model`、`--dnabert-python`，含义同 `single_easy_bin`。
+* 图融合 / 聚类参数 `--knn-kernel`、`--cluster-algorithm`、`--cluster-resolution`、`--fusion-weights`、`--fusion-weights-multimodal`、`--no-coabundance-kl`，含义同 `single_easy_bin`。注意：共丰度 KL 散度调制在多样本（非 combined）场景下默认启用，`--no-coabundance-kl` 可将其关闭。
 * `--reference-db-data-dir`、`--processes`、`--minfasta-kbs`、`--epochs`、`--batch-size`、`--max-node`、`--max-edges`、`--random-seed`、`--ratio`、`--min-len`、`--ml-threshold`、`--no-recluster`、`--orf-finder`、`--engine` 与 `--tmpdir`，含义同 `single_easy_bin`。
 
 ### generate_cannot_links
@@ -253,7 +254,7 @@ MAGFuse 采用**子命令**式接口。大多数场景只需 `single_easy_bin` �
 
 #### 可选参数
 
-* 图融合 / 聚类参数 `--knn-kernel`、`--fusion-weights`、`--fusion-weights-multimodal`、`--no-coabundance-kl`，含义同 `single_easy_bin`（这些参数影响短读长的图融合聚类与重聚类阶段）。
+* 图融合 / 聚类参数 `--knn-kernel`、`--cluster-algorithm`、`--cluster-resolution`、`--fusion-weights`、`--fusion-weights-multimodal`、`--no-coabundance-kl`，含义同 `single_easy_bin`（这些参数影响短读长的图融合聚类与重聚类阶段）。
 * `--minfasta-kbs`、`--max-node`、`--max-edges`、`-p/--processes/-t/--threads`、`--random-seed`、`--environment`、`--ratio`、`--min-len`、`--no-recluster`、`--orf-finder`、`--engine` 与 `--depth-metabat2`，含义同 `single_easy_bin`。
 
 > 关于短读长的重聚类：MAGFuse 对被判为污染的 bin 采用“带种子的标签传播”（personalized-PageRank，α 随 bin 大小自适应、按 contig 长度加权扩散、用 top-2 置信度边际把边界 contig 留作未分配）进行去污染拆分，且仅当单拷贝标记基因冗余度下降时才接受拆分（见 `SemiBin/marker_refinement.py`）。
@@ -338,4 +339,4 @@ python SemiBin/generate_berts.py -md /path/DNABERT-S \
 ```
 
 * 输出文件名必须为 `dnabert_embedding.npy` / `dnabert_split_embedding.npy`，放在 `data.csv` 同目录；fasta 的行序须与 `data.csv` / `data_split.csv` 一致（`load_multimodal_embeddings` 会逐行校验）。
-* `single_easy_bin`/`multi_easy_bin` 内置的 `--dnabert-model` 自动提取路径对 split 半段有局限（原始 fasta 里没有 `h_1`/`h_2`），推荐用 `generate_berts.py` 显式生成。
+* `single_easy_bin`/`multi_easy_bin` 内置的 `--dnabert-model` 会自动提取（含 split，共享 PCA basis），无需手动操作；`generate_berts.py` 是离线/单独生成嵌入的等价工具。

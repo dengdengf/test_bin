@@ -463,13 +463,6 @@ def parse_args(args):
                        dest='dnabert_python',
                        default=None)
 
-    for p in [single_easy_bin, multi_easy_bin]:
-        p.add_argument('--disable-multimodal-training',
-                       required=False,
-                       help='Disable the multimodal short-read training path and fall back to the legacy self-supervised model.',
-                       dest='disable_multimodal_training',
-                       action='store_true')
-
     for p in [single_easy_bin, multi_easy_bin,
                     generate_sequence_features_single, generate_sequence_features_multi,
                     generate_cannot_links, check_install, concatenate_fasta,
@@ -591,6 +584,20 @@ def parse_args(args):
                           action='store_true',
                           dest='no_coabundance_kl',
                           help='Disable the variance-aware co-abundance (KL) modulation of clustering edges in multi-sample mode.')
+
+        g.add_argument('--cluster-algorithm',
+                          required=False,
+                          choices=['leiden', 'infomap'],
+                          default='leiden',
+                          dest='cluster_algorithm',
+                          help='Global community-detection algorithm used for clustering (default: leiden).')
+
+        g.add_argument('--cluster-resolution',
+                          required=False,
+                          type=float,
+                          default=1.0,
+                          dest='cluster_resolution',
+                          help='Resolution for the Leiden modularity objective; higher gives more, smaller bins (default: 1.0).')
 
         g.add_argument('--no-recluster',
                            required=False,
@@ -1178,9 +1185,9 @@ def training(logger, contig_fasta,
             prodigal_output_faa=args.prodigal_output_faa,
             orf_finder=args.orf_finder)
     else:
+        # Multimodal (DNABERT) training is a core, always-on part of the short-read path.
         multimodal_enabled = (
             getattr(args, 'sequencing_type', None) == 'short_read'
-            and not getattr(args, 'disable_multimodal_training', False)
             and getattr(args, 'dnabert_model_path', None) is not None
         )
         if multimodal_enabled:
@@ -1505,12 +1512,11 @@ def main():
     whole_names = whole_df.index.astype(str).tolist()
     split_names = split_df.index.astype(str).tolist()
 
-    target_names = set(whole_names) | set(split_names)
+    # Keep every parent contig sequence; split contigs (named h_1 / h_2) are not in the
+    # FASTA and are reconstructed below by halving their parent.
     seq_dict = {{}}
     for record in SeqIO.parse(FASTA_PATH, 'fasta'):
-        record_id = str(record.id)
-        if record_id in target_names:
-            seq_dict[record_id] = str(record.seq)
+        seq_dict[str(record.id)] = str(record.seq)
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH, trust_remote_code=True, local_files_only=True)
@@ -1526,7 +1532,17 @@ def main():
 
     if split_names:
         print(f"[DNABERT] Extracting {{len(split_names)}} split-contig embeddings...")
-        split_features = encode_sequences(model, tokenizer, split_names, seq_dict, device)
+        # Split contigs (h_1 / h_2) are not in the FASTA; reconstruct each half from its
+        # parent contig exactly as generate_kmer.py does (first/second half by length).
+        split_seq_dict = {{}}
+        for name in split_names:
+            parent, _, half = name.rpartition('_')
+            base = seq_dict.get(parent)
+            if base is None:
+                raise RuntimeError('Parent contig ' + parent + ' for split ' + name + ' not found in FASTA.')
+            mid = len(base) // 2
+            split_seq_dict[name] = base[:mid] if half == '1' else base[mid:]
+        split_features = encode_sequences(model, tokenizer, split_names, split_seq_dict, device)
         # Reuse the whole-contig PCA basis so whole and split embeddings are comparable.
         reduced_split = apply_reducer(reducer, split_features, out_dim)
     else:
