@@ -1,19 +1,79 @@
-# Outputs of SemiBin
+# Multimodal SemiBin 的输出说明
 
-## Single sample/co-assembly binning
+本页说明 Multimodal SemiBin 运行后在输出目录中生成的文件。本工具在 SemiBin2 (v2.2.0) 基础上扩展（派生自 [SemiBin/SemiBin2](https://github.com/BigDataBiology/SemiBin)，© BigDataBiology，MIT 许可），输出目录结构与 SemiBin2 基本一致，下面会额外标注本项目新增的多模态/图融合/去污染相关文件。
 
-* `output_recluster_bins`: directory of all reconstructed bins after reclustering.
-* `output_bins`: directory of all reconstructed bins before reclustering.
-* `model.pt`: saved semi-supervised deep learning model.
-* `data.csv/data_split.csv`: data used in the training of deep learning model.
-* `*_data_cov.csv/*_data_split_cov.csv`: coverage data generated from depth file.
-* `cannot/cannot.txt`: cannot-link file used in the training.
-* `recluster_bins_info.tsv`: table with basic information on each bin (name, total number of basepairs, number of contigs, N50, and L50; more columns may be added in the future)
+相关文档页：[安装](install.md)、[使用](usage.md)、[generate 子命令](generate.md)、[全部子命令](subcommands.md)、[训练](training.md)、[DNABERT/多模态特征](aemb.md)、[FAQ](faq.md)。
 
-## Multi-samples binning
+## 单样本 / 共组装分箱 (single_easy_bin)
 
-* `bins`: Reconstructed bins from all samples.
-* `samples/*.fasta`: Contig fasta file for every sample from the input whole_contig.fna.
-* `samples/*_data_cov.csv`: same in single sample/coassembly binning.
-* `samples/{sample-name}/`: directory of the output of SemiBin for every sample(same as that in Single sample/coassembly binning). 
+运行 `SemiBin2 single_easy_bin`（或向后兼容的 `SemiBin`）后，输出目录中主要文件如下。
 
+### 分箱结果
+
+| 文件 / 目录 | 说明 |
+| --- | --- |
+| `output_bins/` | 最终重建出的全部 bin（每个 bin 一个 fasta 文件）。默认即为最终结果。 |
+| `output_recluster_bins/` | 启用标记基因去污染重聚类后产生的去污染 bin 目录（见下文「去污染重聚类输出」）。 |
+| `bins_info.tsv` | 每个 bin 的基本信息表：bin 名称、总碱基数、contig 数、N50、L50 等（未来可能新增列）。 |
+| `contig_bins.tsv` | contig 到 bin 的映射表：每行给出一个 contig 及其所属 bin。 |
+
+### 模型与训练数据
+
+| 文件 | 说明 |
+| --- | --- |
+| `model.pt` | 训练好的深度学习模型。短读长 (`short_read`) 路径下默认为本项目的多模态嵌入模型（组成 / 丰度 / DNABERT 三分支 + 门控融合 + 跨模态对齐），若加 `--disable-multimodal-training` 则回退为标准自监督模型。 |
+| `data.csv` | 训练所用的 whole（完整 contig）特征：136 维 canonical 四核苷酸 k-mer 组成 + 归一化丰度。 |
+| `data_split.csv` | 把 contig 切成两半（命名形如 `h_1` / `h_2`，见 `generate_kmer.py`）后的 split 特征，用于自监督约束。 |
+| `*_data_cov.csv` / `*_data_split_cov.csv` | 从 depth（BAM/CRAM 或 strobealign-aemb）生成的覆盖度/丰度数据。 |
+| `cannot/cannot.txt` | 训练使用的 cannot-link 约束文件。 |
+
+### DNABERT 特征文件（多模态路径）
+
+当启用多模态（短读长且未加 `--disable-multimodal-training`）时，需要 DNABERT 嵌入，存放在与 `data.csv` 同一目录下：
+
+| 文件 | 说明 |
+| --- | --- |
+| `dnabert_embedding.npy` | whole contig 的 DNABERT 嵌入（经掩码均值池化 + PCA 降维）。行序须与 `data.csv` 完全一致。 |
+| `dnabert_split_embedding.npy` | split 半段 (`h_1`/`h_2`) 的 DNABERT 嵌入。行序须与 `data_split.csv` 完全一致；与 whole 共享同一个 PCA basis（在 whole 上 fit、对 split 用 transform）。 |
+
+> 文件名必须严格为 `dnabert_embedding.npy` / `dnabert_split_embedding.npy`，且 fasta 行序须与 `data.csv` / `data_split.csv` 逐行对齐 —— `load_multimodal_embeddings` 会逐行校验。生成方法（含 `generate_berts.py` 推荐命令）见 [DNABERT/多模态特征](aemb.md)。
+
+这两个嵌入文件可由 `SemiBin/generate_berts.py` 显式生成（推荐），命令示例：
+
+```bash
+python SemiBin/generate_berts.py -md /path/DNABERT-S \
+  -fd whole.fasta -nd output/dnabert_contig_names.txt -dd output/dnabert_embedding.npy \
+  -sfd split.fasta -snd output/dnabert_split_contig_names.txt -sdd output/dnabert_split_embedding.npy
+```
+
+DNABERT-S 预训练权重较大，已被 gitignore、不随仓库分发，需单独获取（来源：<https://github.com/MAGICS-LAB/DNABERT_S>）后放到 `SemiBin/DNABERT-S/`，或用 `--dnabert-model` 指定路径。
+
+## 去污染重聚类输出 (output_recluster_bins/)
+
+本项目的标记基因去污染重聚类 (`SemiBin/marker_refinement.py`) 替换了上游无条件的标记基因 KMeans 拆分。它在被判为污染的 bin 内做「带种子的标签传播」（personalized-PageRank，α 随 bin 大小自适应、按 contig 长度加权扩散，并用 top-2 置信度边际把边界 contig 留作未分配），**仅当单拷贝标记基因冗余度下降时才接受拆分**。
+
+| 目录 / 文件 | 说明 |
+| --- | --- |
+| `output_recluster_bins/` | 去污染重聚类后的最终 bin 目录。未被判为污染、或拆分未带来冗余度下降的 bin 原样保留。 |
+
+去污染重聚类是否启用，由命令行选项控制（详见 [使用](usage.md)）。
+
+## 多样本分箱 (multi_easy_bin)
+
+| 目录 / 文件 | 说明 |
+| --- | --- |
+| `bins/` | 来自所有样本的重建 bin 汇总。 |
+| `samples/*.fasta` | 由输入的合并 contig（`concatenate_fasta` 产物）拆分出的每个样本的 contig fasta。 |
+| `samples/*_data_cov.csv` | 每个样本的覆盖度数据，含义同单样本路径。 |
+| `samples/{sample-name}/` | 每个样本各自的输出子目录，结构与单样本/共组装分箱一致（包含该样本的 `model.pt`、`data.csv`、`data_split.csv`、`output_bins/`、`bins_info.tsv`、`contig_bins.tsv` 等；启用多模态时还有 `dnabert_embedding.npy` / `dnabert_split_embedding.npy`）。 |
+
+> 多样本（非 combined）路径下，图融合聚类会额外引入「共丰度 KL 散度」边权调制（逐边计算，省内存）；这只影响聚类过程，不会新增持久化输出文件。可用 `--no-coabundance-kl` 关闭。融合权重/核函数等聚类选项见 [使用](usage.md)。
+
+## 引用
+
+如果本工具对你的研究有帮助，请引用上游 SemiBin / SemiBin2：
+
+- Pan et al., *Nat Commun* 13, 2326 (2022). <https://doi.org/10.1038/s41467-022-29843-y>
+- Pan et al., *Bioinformatics* 39(Suppl_1): i21–i29 (2023). <https://doi.org/10.1093/bioinformatics/btad209>
+
+如果使用了 DNABERT 特征，请额外引用 DNABERT-S（<https://github.com/MAGICS-LAB/DNABERT_S>）。

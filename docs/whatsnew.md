@@ -1,4 +1,82 @@
-# What's New
+# 更新记录
+
+## Multimodal SemiBin（本项目，基于 SemiBin2 v2.2.0）
+
+**Multimodal SemiBin** 在 [SemiBin2](semibin2) (v2.2.0) 的基础上扩展了多模态（组成 / 丰度 / DNABERT 序列嵌入）的特征建模与图融合聚类。命令行入口、子命令与输入输出格式均与 SemiBin2 保持向后兼容（参见 [usage](usage)、[subcommands](subcommands)、[output](output)）。
+
+> 本项目以 MIT 许可派生自 [SemiBin / SemiBin2](https://github.com/BigDataBiology/SemiBin)（© BigDataBiology）。请保留对上游的致谢与引用（见文末[引用](#引用)）。本项目仓库：<https://github.com/dengdengf/test_bin>（分支 `main`）。
+
+### 四点核心改动
+
+| # | 模块 | 改动 |
+|---|------|------|
+| 1 | 多模态嵌入模型<br>(`SemiBin/multimodal_model.py`) | 组成 / 丰度 / DNABERT 三分支编码 + 学习式 softmax 门控融合 + 跨模态对齐损失（向 DNABERT 单向对齐，使用 stop-gradient/detach）。**仅短读长 (`short_read`) 训练路径启用。** |
+| 2 | 多视图相似度图融合聚类<br>(`SemiBin/graph_fusion.py` + `cluster.py`) | 对 embedding / 组成 / 丰度 /（可选）DNABERT 各建 kNN 相似度图，加权融合后跑 Infomap 全局聚类；融合权重与核函数可配置。在多样本（非 combined）下重新引入"共丰度 KL 散度"边权调制（逐边计算，省内存）。上游做法是 embedding ∩ k-mer 取交集再乘 KL 深度矩阵。 |
+| 3 | 标记基因去污染重聚类<br>(`SemiBin/marker_refinement.py`) | 在被判为污染的 bin 内做"带种子的标签传播"(personalized-PageRank，α 随 bin 大小自适应、按 contig 长度加权扩散、用 top-2 置信度边际把边界 contig 留作未分配)；**仅当单拷贝标记基因冗余度下降时才接受拆分。** 上游用标记基因种子初始化 KMeans 且无条件拆分。 |
+| 4 | DNABERT 特征提取<br>(`SemiBin/generate_berts.py`) | 批量推理 + `attention_mask` 掩码均值池化；`whole` 与 `split` **共享同一个 PCA basis**（在 `whole` 上 fit、对 `split` 用 transform）。 |
+
+### 新增命令行参数
+
+DNABERT / 训练（`single_easy_bin`、`multi_easy_bin`）：
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `--dnabert-model PATH` | 内置 `SemiBin/DNABERT-S` 目录 | DNABERT-S 模型路径 |
+| `--dnabert-python PATH` | `$SEMIBIN_DNABERT_PYTHON` 或当前解释器 | 运行 DNABERT 推理的 Python 解释器 |
+| `--disable-multimodal-training` | （关闭）| 关闭多模态，回退标准自监督训练 |
+
+图融合 / 聚类（`single_easy_bin`、`multi_easy_bin`、`bin`）：
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `--knn-kernel {median,local}` | `median` | kNN 相似度图的核函数 |
+| `--fusion-weights EMB COMP ABUND` | `0.60 0.25 0.15` | 无 DNABERT 时的融合权重 |
+| `--fusion-weights-multimodal EMB COMP ABUND DNA` | `0.45 0.15 0.15 0.25` | 有 DNABERT 时的融合权重 |
+| `--no-coabundance-kl` | （开启）| 关闭共丰度 KL 调制 |
+
+### 修复 / 改进要点
+
+- **共丰度 KL 信号恢复**：在多样本（非 combined）图融合中重新把"共丰度 KL 散度"作为边权调制引入，逐边计算以节省内存（不再构造全量 KL 深度矩阵）。
+- **DNABERT 共享 PCA basis**：`whole` 与 `split` 不再各自 fit PCA，而是在 `whole` 上 fit、对 `split` 用 transform，保证两份嵌入位于同一子空间。
+- **对齐损失 stop-gradient**：跨模态对齐为向 DNABERT 的单向对齐，DNABERT 分支用 detach 冻结，避免对齐项反过来污染 DNABERT 表征。
+- **重聚类长度加权 / 自适应 / 置信度剔除**：标签传播按 contig 长度加权扩散、α 随 bin 大小自适应，并用 top-2 置信度边际把边界 contig 留作未分配；只有在单拷贝标记基因冗余度下降时才接受拆分。
+
+### DNABERT 用法要点
+
+- DNABERT-S 预训练权重较大，已 `gitignore`，**不随仓库分发**；需单独获取后放到 `SemiBin/DNABERT-S/`，或用 `--dnabert-model` 指定。来源：<https://github.com/MAGICS-LAB/DNABERT_S>。
+- DNABERT 嵌入用 `generate_berts.py` 生成，需 `whole` + `split` 两份（split 名称形如 `h_1`/`h_2`，见 `generate_kmer.py`），二者共享 PCA basis。
+- 推荐命令：
+
+```bash
+python SemiBin/generate_berts.py -md /path/DNABERT-S \
+  -fd whole.fasta -nd output/dnabert_contig_names.txt -dd output/dnabert_embedding.npy \
+  -sfd split.fasta -snd output/dnabert_split_contig_names.txt -sdd output/dnabert_split_embedding.npy
+```
+
+- 输出文件名必须是 `dnabert_embedding.npy` / `dnabert_split_embedding.npy`，放在 `data.csv` 同目录；fasta 行序须与 `data.csv` / `data_split.csv` 一致（`load_multimodal_embeddings` 会逐行校验）。
+- `single_easy_bin` / `multi_easy_bin` 内置的 `--dnabert-model` 自动提取路径，对 split 半段有局限（原始 fasta 里没有 `h_1`/`h_2`），推荐用 `generate_berts.py` 显式生成。
+
+更多端到端用法见 [usage](usage)、[generate](generate)、[aemb](aemb)。
+
+### 沿用 SemiBin2、未改动的部分
+
+- 输入：contigs（组装结果）+ BAM/CRAM（或 strobealign-aemb 丰度）。
+- `--environment` 预训练模型：`human_gut` / `dog_gut` / `ocean` / `soil` / `cat_gut` / `human_oral` / `mouse_gut` / `pig_gut` / `built_environment` / `wastewater` / `chicken_caecum` / `global`。
+- 长读长：`--sequencing-type=long_read` 或 `bin_long`，沿用 DBSCAN 集成算法（本项目未改动）。
+- k-mer 组成 = 136 维 canonical 四核苷酸；丰度归一化逻辑未改。
+- 外部依赖：bedtools、hmmer、samtools（可选 mmseqs2、prodigal）。支持 Python 3.7–3.13。
+
+### 引用
+
+- Pan et al., *Nat Commun* 13, 2326 (2022). <https://doi.org/10.1038/s41467-022-29843-y>
+- Pan et al., *Bioinformatics* 39(Suppl_1): i21–i29 (2023). <https://doi.org/10.1093/bioinformatics/btad209>
+- 若使用了 DNABERT 特征，请同时引用 DNABERT-S。
+
+---
+
+# 以下为上游 SemiBin 的历史更新记录
+
+> 下列内容为上游 [SemiBin / SemiBin2](https://github.com/BigDataBiology/SemiBin) 的历史版本记录，保留以便追溯。其中链接指向上游仓库的 issue / 提交。
 
 ## Version 2.2.0
 
@@ -84,7 +162,7 @@ This is a bugfix release for _version 2.0.0_.
 *Released Jan 17, 2023*
 
 Big change is the addition of a `SemiBin2` script, which is still experimental, but should be a slightly nicer interface.
-See [[upgrading to SemiBin2](semibin2)]
+See [upgrading to SemiBin2](semibin2)
 
 ### User-visible improvements
 
@@ -148,7 +226,7 @@ The previous arguments should continue to work, but going forward, the newer arg
 
 ### User visible improvements
 
-- Added _self-supervised learning mode_ (see [[Training SemiBin models](training)] for more details)
+- Added _self-supervised learning mode_ (see [Training SemiBin models](training) for more details)
 
 ### Bugfixes
 
@@ -379,4 +457,3 @@ This release solves [issues running on Mac OS X](https://github.com/BigDataBiolo
 *Released 21 March 2021*
 
 - First release: testing version
-

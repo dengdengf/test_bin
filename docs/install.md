@@ -1,103 +1,109 @@
-# Install
+# 安装指南
 
-SemiBin can run on Python 3.7-3.13.
+本页介绍如何安装 **Multimodal SemiBin** —— 在 SemiBin2 (v2.2.0) 基础上扩展的多模态宏基因组分箱工具（MIT 许可，派生自 [SemiBin/SemiBin2](https://github.com/BigDataBiology/SemiBin)，© BigDataBiology）。
 
-## Install with pixi
+本项目通过源码安装，命令行入口仍为 `SemiBin2`（向后兼容 `SemiBin`）。
 
-The current recommended way to install SemiBin is to use [pixi](https://pixi.sh/). Pixi will use the packages from conda-forge and bioconda to install SemiBin and its dependencies.
+> 关于本项目相对上游 SemiBin2 的改动（多模态嵌入、多视图图融合聚类、标记基因去污染重聚类、DNABERT 特征提取），请参见 [whatsnew.md](whatsnew.md) 与 [usage.md](usage.md)。
 
-### CPU-only mode
+## Python 版本要求
 
-Create a `pixi.toml` file with the following content.
+支持 Python **3.7 – 3.13**。
 
-```toml
-[project]
-authors = ["Luis Pedro Coelho <luis@luispedro.org>"]
-channels = ["conda-forge", "bioconda"]
-name = "semibin_install"
-platforms = ["linux-64", "osx-64"]
-version = "0.1.0"
+## 1. 外部依赖
 
-[tasks]
-
-[dependencies]
-semibin = ">=2.2.0,<3"
-```
-
-Then, run `pixi install` in the same directory as the `pixi.toml` file to download and install SemiBin2.
-
-
-### With GPU support
-
-If you want to use SemiBin with GPU, you need to install Pytorch with GPU support as well. Starting with the example above, you need to add `pytorch-gpu` to the `dependencies` section and `cuda` to the `system-requirements` section.
-
-```toml
-[project]
-authors = ["Luis Pedro Coelho <luis@luispedro.org>"]
-channels = ["conda-forge", "bioconda"]
-name = "semibin_install"
-platforms = ["linux-64"]
-version = "0.1.0"
-
-[tasks]
-
-[dependencies]
-semibin = ">=2.2.0,<3"
-pytorch-gpu = "*"
-
-[system-requirements]
-cuda = "12.0"
-```
-
-## Install with conda
-
-Pixi is now the recommended way to install SemiBin. However, if you prefer to use conda, you can install SemiBin with it
-
-### Simple Mode
+SemiBin 运行需要以下外部命令行工具，推荐用 conda 从 bioconda 安装：
 
 ```bash
-conda create -n SemiBin
+conda create -n SemiBin python
 conda activate SemiBin
-conda install -c conda-forge -c bioconda semibin
+conda install -c conda-forge -c bioconda bedtools hmmer samtools
 ```
 
-### With GPU support
+| 工具 | 用途 | 是否必需 |
+| --- | --- | --- |
+| [bedtools](http://bedtools.readthedocs.org/) | 丰度/覆盖度计算 | 必需 |
+| [hmmer](http://hmmer.org/) | 单拷贝标记基因检测 | 必需 |
+| [samtools](http://www.htslib.org/) | BAM/CRAM 处理 | 必需 |
+| [mmseqs2](https://github.com/soedinglab/MMseqs2) | 半监督模式生成 cannot-link 约束 | 可选 |
+| [prodigal](https://github.com/hyattpd/Prodigal) | 基因预测 | 可选 |
 
-To get GPU support, you need to install Pytorch with GPU support as well, following the instructions on the [Pytorch website](https://pytorch.org/get-started/locally/). As of March 2025, it appears that you need to mix `conda` and `pip` and the following commands should work:
+可选工具按需安装：
 
 ```bash
-conda create -n SemiBin python pip
-conda activate SemiBin
-pip install torch torchvision torchaudio
-conda install -c conda-forge -c bioconda semibin
+conda install -c conda-forge -c bioconda mmseqs2 prodigal
 ```
 
-This will install SemiBin and all its dependencies. Pixi is—however—the recommended way to install SemiBin with GPU support.
+## 2. 从本仓库源码安装
 
-## Install from source
-
-You will need the following dependencies:
-- [Bedtools](http://bedtools.readthedocs.org/]), [Hmmer](http://hmmer.org/)
-- [Prodigal](https://github.com/hyattpd/Prodigal)
-
-
-You can obtain them from conda with the following commands
+本项目不通过 conda/PyPI 分发，需从源码安装：
 
 ```bash
-conda install -c bioconda bedtools hmmer samtools
-```
-
-Then, installing should be a simple matter of running:
-
-```bash
+git clone https://github.com/dengdengf/test_bin
+cd test_bin
 pip install .
 ```
 
-## Alternative ways of running SemiBin
+安装完成后即可使用 `SemiBin2`（及别名 `SemiBin`）命令。验证：
 
-If you use one of these pipelines, we ask that you cite both the pipeline author and the [SemiBin manuscript](https://www.nature.com/articles/s41467-022-29843-y) (as well as any other pipeline-embedded tools which contribute to your results).
+```bash
+SemiBin2 --version
+SemiBin2 --help
+```
 
-- [ATLAS](https://metagenome-atlas.github.io/) is a Snakemake-based pipeline for metagenomics, which includes SemiBin (as well as other binners and tools).
-- [Galaxy toolshed](https://toolshed.g2.bx.psu.edu/view/iuc/suite_semibin/) also includes a [SemiBin wrapper](https://toolshed.g2.bx.psu.edu/view/iuc/suite_semibin/)
+> 如需 GPU 加速，请按 [PyTorch 官网](https://pytorch.org/get-started/locally/) 的说明先安装带 CUDA 支持的 PyTorch，再执行上面的 `pip install .`。
 
+## 3. DNABERT 额外依赖（可选）
 
+只有在使用多模态/DNABERT 特征时才需要这一步。标准自监督流程（或使用 `--disable-multimodal-training`）不依赖这些组件。
+
+### 3.1 Python 依赖
+
+```bash
+pip install "transformers>=4.30" biopython tqdm
+```
+
+### 3.2 获取并放置 DNABERT-S 模型
+
+DNABERT-S 预训练权重体积较大，已被 `.gitignore`，**不随本仓库分发**，需单独获取：
+
+- 来源：[https://github.com/MAGICS-LAB/DNABERT_S](https://github.com/MAGICS-LAB/DNABERT_S)
+- 放置位置：默认放到仓库内的 `SemiBin/DNABERT-S/` 目录；
+- 或放在任意位置，运行时用 `--dnabert-model PATH` 指定。
+
+相关命令行参数（`single_easy_bin` / `multi_easy_bin`）：
+
+| 参数 | 默认值 | 说明 |
+| --- | --- | --- |
+| `--dnabert-model PATH` | 内置 `SemiBin/DNABERT-S` 目录 | DNABERT-S 模型路径 |
+| `--dnabert-python PATH` | `$SEMIBIN_DNABERT_PYTHON` 或当前解释器 | 运行 DNABERT 推理的 Python 解释器 |
+| `--disable-multimodal-training` | — | 关闭多模态，回退标准自监督训练 |
+
+### 3.3 关于 DNABERT 嵌入文件
+
+DNABERT 嵌入需要 **whole + split 两份**，二者共享同一个 PCA basis（在 whole 上 fit、对 split 用 transform）。推荐用 `SemiBin/generate_berts.py` 显式生成：
+
+```bash
+python SemiBin/generate_berts.py -md /path/DNABERT-S \
+  -fd whole.fasta -nd output/dnabert_contig_names.txt -dd output/dnabert_embedding.npy \
+  -sfd split.fasta -snd output/dnabert_split_contig_names.txt -sdd output/dnabert_split_embedding.npy
+```
+
+注意事项：
+
+- 输出文件名必须是 `dnabert_embedding.npy` / `dnabert_split_embedding.npy`，放在 `data.csv` 同目录；
+- fasta 行序须与 `data.csv` / `data_split.csv` 一致（`load_multimodal_embeddings` 会逐行校验）；
+- split 半段名称形如 `h_1` / `h_2`（见 `generate_kmer.py`），原始 fasta 中没有这些半段，因此 `single_easy_bin` / `multi_easy_bin` 内置的自动提取对 split 有局限，推荐用 `generate_berts.py` 显式生成。
+
+DNABERT 的具体用法见 [usage.md](usage.md) 与 [generate.md](generate.md)。
+
+## 引用
+
+如果本工具对你的研究有帮助，请引用上游 SemiBin / SemiBin2：
+
+- Pan et al., *Nat Commun* 13, 2326 (2022). <https://doi.org/10.1038/s41467-022-29843-y>
+- Pan et al., *Bioinformatics* 39(Suppl_1): i21–i29 (2023). <https://doi.org/10.1093/bioinformatics/btad209>
+
+如果使用了 DNABERT 特征，请同时引用 DNABERT-S（[MAGICS-LAB/DNABERT_S](https://github.com/MAGICS-LAB/DNABERT_S)）。
+
+引用信息也可通过 `SemiBin2 citation` 获取。

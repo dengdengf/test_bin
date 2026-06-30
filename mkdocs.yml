@@ -1,5 +1,5 @@
-site_name: "SemiBin"
-repo_url: "https://github.com/BigDataBiology/SemiBin"
+site_name: "Multimodal SemiBin"
+repo_url: "https://github.com/dengdengf/test_bin"
 repo_name: "GitHub"
 
 theme:
@@ -9,16 +9,16 @@ theme:
     prev_next_buttons_location: both
 
 nav:
-        - 'SemiBin': index.md
-        - 'Install': install.md
-        - 'Usage examples': usage.md
-        - 'SemiBin2 compared to SemiBin1': semibin2.md
-        - 'Generating inputs to SemiBin': generate.md
-        - 'Output': output.md
-        - 'Running AEMB': aemb.md
-        - "Subcommand reference": subcommands.md
-        - "What's New": whatsnew.md
-        - "Training SemiBin models": training.md
-        - "FAQ": faq.md
-        - "Using semi-supervised binning": semi-supervised.md
+        - '项目总览': index.md
+        - '安装': install.md
+        - '用法示例': usage.md
+        - '相对 SemiBin2 的改动': semibin2.md
+        - '生成输入': generate.md
+        - '输出说明': output.md
+        - '使用 AEMB 丰度': aemb.md
+        - '子命令参考': subcommands.md
+        - '更新记录': whatsnew.md
+        - '训练模型': training.md
+        - '常见问题': faq.md
+        - '半监督分箱': semi-supervised.md
 

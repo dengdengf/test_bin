@@ -1,49 +1,58 @@
-# Usage examples
+# 用法示例
 
-## Binning modes
+本页给出 Multimodal SemiBin 的主要用法示例。命令行入口为 `SemiBin2`（向后兼容 `SemiBin`），子命令与上游 SemiBin2 (v2.2.0) 一致。
 
-SemiBin2 supports three different binning modes, with different tradeoffs.
+> 关于如何准备输入（contigs 组装结果 + BAM/CRAM 或 strobealign-aemb 丰度），见 [generate](generate.md)。
+> 输出文件结构见 [output](output.md)；全部子命令与参数见 [subcommands](subcommands.md)；安装见 [install](install.md)。
+> 本项目相对上游的改动概览见 [semibin2](semibin2.md) 与 [whatsnew](whatsnew.md)。
 
-### Single-sample binning
+Multimodal SemiBin 派生自 [SemiBin / SemiBin2](https://github.com/BigDataBiology/SemiBin)（© BigDataBiology，MIT 许可）。请在使用时保留对上游的致谢与[引用](#引用)。
 
-Single sample binning means that each sample is assembled and binned independently.
+---
 
-This mode allows for parallel binning of samples and avoids cross-sample chimeras, but it does not use co-abundance information across samples.
+## 分箱模式概览
 
-Using a prebuilt model means that SemiBin2 can return results in a few minutes.
+| 模式 | 命令 | 是否可用预训练模型 | 适用场景 |
+| --- | --- | --- | --- |
+| 单样本分箱 | `single_easy_bin` | 是（`--environment`） | 每个样本独立组装、独立分箱 |
+| 共组装分箱 | `single_easy_bin`（多个 BAM） | 否 | 样本相似、可共组装（如同一生境的时间序列） |
+| 多样本分箱 | `multi_easy_bin` | 否 | 多样本独立组装，但联合使用共丰度信息 |
 
-### Co-assembly binning
+- **单样本分箱**：每个样本独立组装并独立分箱，可并行、避免跨样本嵌合，但不使用跨样本共丰度信息。配合预训练模型可在几分钟内出结果。
+- **共组装分箱**：先把样本池当作单一样本共组装，再分箱。可利用共丰度信息，但可能产生样本间嵌合 contig，且不保留样本特异性差异。
+- **多样本分箱**：各样本独立组装、独立分箱，但**联合使用多样本信息**，既能用共丰度又能保留样本特异性差异，通常在复杂生境（如土壤）中得到最多的 bin，代价是计算量更大且无法使用预训练模型。
 
-Co-assembly binning means samples are co-assembled first (as if the pool of samples were a single sample) and then bins are constructed from this pool of co-assembled contigs.
+---
 
-This mode can potentially generate better contigs (especially from species that are at a low abundance in any individual sample) and uses co-abundance information which can lead to better bins.
-On the other hand, co-assembly can lead to inter-sample chimeric contigs and binning based on co-assembly does not retain sample-specific variation.
+## 多模态相关的本项目特性
 
-It is most appropriate when the samples are very similar and can be expected to contain overlapping sets of organisms (_e.g._, a time-series from the same habitat).
+本项目在上游标准自监督流程之外，新增了以下能力（仅在此处罗列，详见 [semibin2](semibin2.md)）：
 
-### Multi-sample binning
+- **多模态嵌入模型**（组成 / 丰度 / DNABERT 三分支 + 学习式门控融合 + 跨模态对齐损失）。仅在**短读长**（`short_read`）训练路径下启用，可用 `--disable-multimodal-training` 关闭、回退标准自监督。
+- **多视图相似度图融合聚类**：对 embedding / 组成 / 丰度 /（可选）DNABERT 各建 kNN 相似度图，加权融合后跑 Infomap 全局聚类。融合权重、核函数可配置，并在多样本（非 combined）下重新引入"共丰度 KL 散度"边权调制。
+- **标记基因去污染重聚类**：在被判为污染的 bin 内做带种子的标签传播，仅当单拷贝标记基因冗余度下降时才接受拆分。
 
-With multi-sample binning, multiple samples are assembled and binned individually, but _information from multiple samples is used together_.
-This mode can use co-abundance information and retain sample-specific variation at the same time.
-As we document in the [SemiBin1](https://www.nature.com/articles/s41467-022-29843-y) and [SemiBin2](https://academic.oup.com/bioinformatics/article/39/Supplement_1/i21/7210480) manuscripts, this mode often returns the highest-number of bins (particularly for complex environments, such as soil).
+新增的命令行参数：
 
-However, it has increased computational costs.
-In particular, prebuilt models cannot be used.
+| 参数 | 适用子命令 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `--knn-kernel {median,local}` | `single_easy_bin` / `multi_easy_bin` / `bin` | `median` | kNN 相似度图核函数 |
+| `--fusion-weights EMB COMP ABUND` | 同上 | `0.60 0.25 0.15` | 非多模态时的融合权重 |
+| `--fusion-weights-multimodal EMB COMP ABUND DNA` | 同上 | `0.45 0.15 0.15 0.25` | 多模态（含 DNABERT）时的融合权重 |
+| `--no-coabundance-kl` | 同上 | （默认开启 KL） | 关闭共丰度 KL 调制 |
+| `--dnabert-model PATH` | `single_easy_bin` / `multi_easy_bin` | 内置 `SemiBin/DNABERT-S` 目录 | DNABERT-S 权重路径 |
+| `--dnabert-python PATH` | 同上 | `$SEMIBIN_DNABERT_PYTHON` 或当前解释器 | 运行 DNABERT 推理的 Python 解释器 |
+| `--disable-multimodal-training` | 同上 | （默认开启多模态） | 关闭多模态，回退标准自监督 |
 
-This mode is implemented by concatenating the contigs assembled from the individual samples together and then mapping reads from each sample to this concatenated database.
-Concatenating the inputs can be done with the `concatenate_fasta` subcommand.
+---
 
-## Single-sample binning
+## 单样本分箱
 
-Inputs required: `S1.fa` (contig file in FASTA format) and `S1.sorted.bam` (short reads mapped to the contigs, sorted).
+所需输入：`S1.fa`（FASTA 格式 contig）与 `S1.sorted.bam`（短读长比对到 contig 并排序后的 BAM）。
 
-[[How to generate inputs to SemiBin](../generate)]
+### 1. 使用预训练模型（最快）
 
-### Easy single binning mode
-
-There are two options.
-
-**1. Using a pre-trained model.** This is the fastest option and should work the best if you have metagenomes from one of our prebuilt habitats (alternatively, you can use the `global` "habitat" which combines all of them).
+如果你的宏基因组属于内置生境之一，使用预训练模型可在几分钟内返回结果（也可使用综合模型 `global`）。
 
 ```bash
 SemiBin2 single_easy_bin \
@@ -53,36 +62,13 @@ SemiBin2 single_easy_bin \
         -o output
 ```
 
-Binning assemblies from long reads:
+支持的生境（名称即含义，`global` 为通用综合模型）：
 
-```bash
-SemiBin2 single_easy_bin \
-        --environment human_gut \
-        --sequencing-type long_read \
-        -i S1.fa \
-        -b S1.sorted.bam \
-        -o output
-```
+`human_gut`、`dog_gut`、`ocean`、`soil`、`cat_gut`、`human_oral`、`mouse_gut`、`pig_gut`、`built_environment`、`wastewater`、`chicken_caecum`、`global`。
 
-Supported habitats are (names should be self-explanatory, except `global` which is a generic model):
+### 2. 学习一个新模型（自监督）
 
-1.  `human_gut`
-2.  `dog_gut`
-3.  `ocean`
-4.  `soil`
-5.  `cat_gut`
-6.  `human_oral`
-7.  `mouse_gut`
-8.  `pig_gut`
-9.  `built_environment`
-10. `wastewater`
-11. `chicken_caecum`
-12. `global`
-
-[Figure 5 in the SemiBin1 manuscript](https://www.nature.com/articles/s41467-022-29843-y#Fig5) shows details of how well each habitat-specific model performs (except for the `chicken_caecum` model which was contributed after publication by [Florian Plaza Oñate](https://scholar.google.com/citations?user=-gE5y_4AAAAJ) and is available since version 1.2).
-
-**2a. Learn a new model (self-supervised mode).** You can also learn a new model for your data.
-It will take a bit of time, but may produce better results:
+不使用内置模型，针对你自己的数据学习一个新模型。会更慢，但可能得到更好的结果。短读长下默认启用多模态训练路径：
 
 ```bash
 SemiBin2 single_easy_bin \
@@ -92,37 +78,72 @@ SemiBin2 single_easy_bin \
         -o output
 ```
 
-The [Supplemental Tables 5 & 6 in the SemiBin1 manuscript](https://www.nature.com/articles/s41467-022-29843-y#MOESM1) contain a lot more information with respect to the computational trade-offs.
+如果你想关闭多模态、走标准自监督路径：
 
-If you have a lot of samples that are similar to each other while not fitting into any of our builtin trained models, you can also build your own model from a subset of them (see [[training a SemiBin model](training)])
+```bash
+SemiBin2 single_easy_bin \
+        --self-supervised \
+        --disable-multimodal-training \
+        -i S1.fa \
+        -b S1.sorted.bam \
+        -o output
+```
 
-### Advanced single-sample binning workflows
+如果样本数量较多且彼此相似、但不属于任何内置模型，你也可以从其中一部分样本自建模型，见 [training](training.md)。
 
-The basic pipeline using SemiBin2 for either single-sample and co-assembly modes:
+### 长读长
 
-1. generate _data.csv_ and _data_split.csv_ (used in training) for every sample,
-2. train the model for every sample, and
-3. bin the contigs with the model trained from the same sample.
+长读长分箱使用 `--sequencing-type=long_read`（沿用上游 DBSCAN 集成算法，本项目未改动）：
 
-You can run the individual steps by yourself, which can enable using compute clusters to make the binning process faster.
+```bash
+SemiBin2 single_easy_bin \
+        --environment human_gut \
+        --sequencing-type long_read \
+        -i S1.fa \
+        -b S1.sorted.bam \
+        -o output
+```
 
-In particular, `single_easy_bin` includes the following steps:
+> 注意：多模态训练仅在短读长路径启用，长读长路径不涉及多模态嵌入。
 
-1. `generate_data_single`
-2. `train_self`
-3. `bin_short` or `bin_long`
+### 调整图融合聚类参数
 
-`multi_easy_bin` includes
-1. `generate_data_multi`
-2. `train_self` (if needed)
-3. `bin_short` or `bin_long`
+聚类阶段的图融合行为可通过新增参数调整。例如改用 `local` 核、自定义非多模态融合权重、并关闭共丰度 KL 调制：
 
-(1)  Generate features (`data.csv/data_split.csv` files)
+```bash
+SemiBin2 single_easy_bin \
+        --self-supervised \
+        --disable-multimodal-training \
+        --knn-kernel local \
+        --fusion-weights 0.70 0.20 0.10 \
+        --no-coabundance-kl \
+        -i S1.fa \
+        -b S1.sorted.bam \
+        -o output
+```
+
+启用多模态时，使用 `--fusion-weights-multimodal`（四个权重对应 EMB / COMP / ABUND / DNA）：
+
+```bash
+SemiBin2 single_easy_bin \
+        --self-supervised \
+        --fusion-weights-multimodal 0.45 0.15 0.15 0.25 \
+        -i S1.fa \
+        -b S1.sorted.bam \
+        -o output
+```
+
+### 进阶：拆分单样本流程的各步骤
+
+`single_easy_bin` 内部依次执行 `generate_data_single` → `train_self` → `bin_short`/`bin_long`。你可以手动运行各步骤，以便在计算集群上并行加速。
+
+(1) 生成特征（`data.csv` / `data_split.csv`）：
 
 ```bash
 SemiBin2 generate_sequence_features_single -i S1.fa -b S1.sorted.bam -o S1_output
 ```
-(3) Train a model (if desired)
+
+(2) 训练模型（如需）。该步骤受益于 GPU，会自动检测，也可用 `--engine` 指定 CPU/GPU：
 
 ```bash
 SemiBin2 train_self \
@@ -131,12 +152,10 @@ SemiBin2 train_self \
     -o S1_output
 ```
 
-This step heavily benefits from having access to a GPU.
-It will attempt to auto-detect whether one is available, but you can use the `--engine` argument to specify whether SemiBin2 should use CPU or GPU processing.
+如使用预训练模型，可跳过此步。
 
-This step can be skipped if you want to use a pretrained model.
+(3) 分箱：
 
-(4) Bin
 ```bash
 SemiBin2 bin_short \
     -i S1.fa \
@@ -144,7 +163,9 @@ SemiBin2 bin_short \
     --data S1_output/data.csv \
     -o S1_output
 ```
-or
+
+长读长用 `bin_long`：
+
 ```bash
 SemiBin2 bin_long \
     -i S1.fa \
@@ -153,7 +174,7 @@ SemiBin2 bin_long \
     -o S1_output
 ```
 
-or, to use one of our built-in models (see above for the list of available models), you replace the `--model` argument with the `--environment` argument:
+或用内置预训练模型（把 `--model` 换成 `--environment`）：
 
 ```bash
 SemiBin2 bin_short \
@@ -162,42 +183,16 @@ SemiBin2 bin_short \
     --data S1_output/data.csv \
     -o S1_output
 ```
-or
-```bash
-SemiBin2 bin_long \
-    -i S1.fa \
-    --environment human_gut \
-    --data S1_output/data.csv \
-    -o S1_output
-```
 
-### SemiBin2(pretrain)
+`bin` / `bin_short` 同样接受 `--knn-kernel`、`--fusion-weights`、`--no-coabundance-kl` 等图融合参数。
 
-Another suggestion is that you can pre-train a model from part of your dataset, which can provide a balance as it is faster than training for each sample while achieving better results than a pre-trained model from another dataset (see the [SemiBin1 manuscript](https://www.nature.com/articles/s41467-022-29843-y) for more information).
+---
 
-If you have `S1.fa`, `S1/data.csv`, `S1/data_split.csv`, `S1/cannot/cannot.txt`; `S2.fa`, `S2/data.csv`, `S2/data_split.csv`, `S2/cannot/cannot.txt`; `S3.fa`, `S3/data.csv`, `S3/data_split.csv`, `S3/cannot/cannot.txt`.
-You can train the model from 3 samples.
+## 共组装分箱
 
-```bash
-SemiBin2 train \
-    -i S1.fa S2.fa S3.fa \
-    --data S1/data.csv S2/data.csv S3/data.csv \
-    --data-split S1/data_split.csv S2/data_split.csv S3/data_split.csv \
-    -c S1/cannot.txt s2/cannot.txt S3/cannot.txt \
-    --mode several \
-    -o S1_output
-```
+输入：`contig.fa` 与多个 BAM（`S1.sorted.bam`、`S2.sorted.bam`、`S3.sorted.bam` …）。
 
-## Co-assembly binning
-
-Input: `contig.fa` and `S1.sorted.bam`, `S2.sorted.bam`, `S3.sorted.bam`,...
-
-### Easy co-assembly binning mode
-
-To a large extent, co-assembly binning is just like single-sample binning.
-The major difference is that when generating features, we can use multiple samples.
-Unfortunately, this also means that prebuilt models cannot be used (because models depend on the number of samples, one would need to pre-train a model for each possible input sample input number).
-
+共组装与单样本流程基本一致，区别在于生成特征时使用多个样本的 BAM。因此**无法使用预训练模型**（模型依赖样本数量）。
 
 ```bash
 SemiBin2 single_easy_bin \
@@ -206,34 +201,22 @@ SemiBin2 single_easy_bin \
     -o co-assembly_output
 ```
 
-### Advanced co-assembly binning workflows
-
-
-(1)  Generate `data.csv/data_split.csv`
+进阶（拆分各步骤）：
 
 ```bash
+# (1) 生成特征（仍用 single 模式，因共组装与单样本流程相近）
 SemiBin2 generate_sequence_features_single \
     -i contig.fa \
     -b S1.sorted.bam S2.sorted.bam S3.sorted.bam \
     -o contig_output
-```
 
-Note that we use the `generate_sequence_features_single` mode because co-assembly and single-sample modes are very similar.
-
-(2) Train
-```bash
+# (2) 训练
 SemiBin2 train_self \
     --data contig_output/data.csv \
     --data-split contig_output/data_split.csv \
     -o contig_output
-```
 
-SemiBin2 will attempt to detect a GPU and fallback to CPU if none is found, but you can use the `--engine` argument to specify which one to use.
-Having access to a GPU can speed up this mode.
-
-(3) Bin
-
-```bash
+# (3) 分箱
 SemiBin2 bin_short \
     -i contig.fa \
     --model contig_output/model.pt \
@@ -241,19 +224,19 @@ SemiBin2 bin_short \
     -o output
 ```
 
+---
 
-## Multi-sample binning
+## 多样本分箱
 
-Multi-sample binning requires more complex steps to prepare input data as well as more computation but can also result in more bins (particularly in complex habitats).
-See [Figure 3b in the SemiBin1 manuscript](https://www.nature.com/articles/s41467-022-29843-y#Fig3) for a comparison of multi sample vs. single sample.
+多样本分箱准备数据更复杂、计算量更大，但在复杂生境中往往能得到更多 bin。
 
-Inputs:
-- original FASTA files: `S1.fa`, `S2.fa`, `S3.fa`, `S4.fa`, and `S5.fa` (we will assume that there are 5 samples)
-- combined FASTA file: `concatenated.fa.gz` (can be generated with the `concatenate_fasta` SemiBin2 subcommand)
-- mapped reads to the combined FASTA file: `S1.sorted.bam`, `S2.sorted.bam`, `S3.sorted.bam`, `S4.sorted.bam`, and `S5.sorted.bam`.
+输入：
 
+- 各样本原始 FASTA：`S1.fa`、`S2.fa`、`S3.fa`、`S4.fa`、`S5.fa`（这里假设 5 个样本）；
+- 合并后的 FASTA：`concatenated.fa`（由 `concatenate_fasta` 子命令生成）；
+- 各样本读长比对到合并 FASTA 后的 BAM：`S1.sorted.bam` … `S5.sorted.bam`。
 
-### Generating `concatenated.fa`
+### 生成 `concatenated.fa`
 
 ```bash
 SemiBin2 concatenate_fasta \
@@ -261,35 +244,13 @@ SemiBin2 concatenate_fasta \
     --output output
 ```
 
-This will produce the file `output/concatenated.fa`
+会产生 `output/concatenated.fa`。
 
-**Technical note on the format of `concatenated.fa`**: every contig is renamed to the name `<sample_name>:<original_contig_name>`, where `:` is the default separator (it can be changed with the `--separator` argument, which _must then be passed to all the commands that use it_).
-Using the `concatenate_fasta` subcammand will make sure that sample names are unique and the separator does not introduce confusion when splitting (that is, that the separator is not already used in the contig or sample names).
-Otherwise, you can also prepare the file yourself.
-For example:
+**格式说明**：每个 contig 被重命名为 `<sample_name>:<original_contig_name>`，`:` 为默认分隔符（可用 `--separator` 修改，但**之后所有用到它的命令都要带上同一分隔符**）。`concatenate_fasta` 会保证样本名唯一且分隔符不会引入歧义。随后请将每个样本分别比对到合并 FASTA，得到各自的 `sorted.bam`。
 
-```bash
->S1:Contig_1
-AGATAATAAAGATAATAATA
->S1:Contig_2
-CGAATTTATCTCAAGAACAAGAAAA
->S1:Contig_3
-AAAAAGAGAAAATTCAGAATTAGCCAATAAAATA
->S2:Contig_1
-AATGATATAATACTTAATA
->S2:Contig_2
-AAAATATTAAAGAAATAATGAAAGAAA
->S3:Contig_1
-ATAAAGACGATAAAATAATAAAAGCCAAATCCGACAAAGAAAGAACGG
->S3:Contig_2
-AATATTTTAGAGAAAGACATAAACAATAAGAAAAGTATT
->S3:Contig_3
-CAAAT
-```
+### Easy 多样本分箱
 
-Afterwards, you should map each sample separately to the concatenated FASTA file to produce the respective `sorted.bam` file.
-
-### Easy multi binning mode
+短读长（默认启用多模态训练）：
 
 ```bash
 SemiBin2 multi_easy_bin \
@@ -298,7 +259,17 @@ SemiBin2 multi_easy_bin \
         -o multi_output
 ```
 
-or for long reads:
+走标准路径（关闭多模态）：
+
+```bash
+SemiBin2 multi_easy_bin \
+        --disable-multimodal-training \
+        -i concatenated.fa \
+        -b S1.sorted.bam S2.sorted.bam S3.sorted.bam S4.sorted.bam S5.sorted.bam \
+        -o multi_output
+```
+
+长读长：
 
 ```bash
 SemiBin2 multi_easy_bin \
@@ -308,22 +279,22 @@ SemiBin2 multi_easy_bin \
         -o multi_output
 ```
 
-### Advanced multi-sample binning workflows workflows
+> 多样本（非 combined）模式下，图融合聚类会在边权上重新引入共丰度 KL 散度调制；可用 `--no-coabundance-kl` 关闭。
 
-As with the other modes, the `multi_easy_bin` subcommand encapsulates a series of steps that can also be run independently for more control.
-They can also be parallelized in a compute cluster, for example.
+### 进阶：拆分多样本流程的各步骤
 
-(1)  Generate `data.csv/data_split.csv`
+`multi_easy_bin` 内部依次执行 `generate_data_multi` → `train_self`（如需）→ `bin_short`/`bin_long`，各步骤可独立运行并在集群上并行。
+
+(1) 生成 `data.csv` / `data_split.csv`：
 
 ```bash
 SemiBin2 generate_sequence_features_multi \
-    -i concatenated.fa.gz \
+    -i concatenated.fa \
     -b S1.sorted.bam S2.sorted.bam S3.sorted.bam S4.sorted.bam S5.sorted.bam \
-    -o output
+    -o multi_output
 ```
-(2) Train
 
-Training is performed independently for each sample (thus, could be parallelized), but uses the _input features that account for all the sample data_:
+(2) 训练（逐样本独立，但使用涵盖全部样本数据的输入特征，可并行）：
 
 ```bash
 for sample in S1 S2 S3 S4 S5 ; do
@@ -334,11 +305,7 @@ for sample in S1 S2 S3 S4 S5 ; do
 done
 ```
 
-The same comments about GPU access that applied to the other modes, apply here.
-
-(3) Bin
-
-There are two subcommands, depending on whether you want to use the binning mode for short reads (`bin_short`) of for long reads (`bin_long`), so that this would be either
+(3) 分箱（`bin_short` 短读长 / `bin_long` 长读长，逐样本独立）：
 
 ```bash
 for sample in S1 S2 S3 S4 S5 ; do
@@ -349,27 +316,101 @@ for sample in S1 S2 S3 S4 S5 ; do
         -o output
 done
 ```
-or
+
+---
+
+## 用部分样本预训练模型
+
+你可以从数据集中的一部分样本预训练一个模型，作为折中：比逐样本训练更快，又比来自其它数据集的预训练模型效果更好。
+
+假设已有 `S1.fa`、`S1/data.csv`、`S1/data_split.csv`、`S1/cannot.txt`（`S2`、`S3` 同理），可用 3 个样本训练：
+
 ```bash
-for sample in S1 S2 S3 S4 S5 ; do
-    SemiBin2 bin_long \
-        -i ${sample}.fa \
-        --model ${sample}_output/model.pt \
-        --data multi_output/samples/${sample}/data.csv \
-        -o output
-done
+SemiBin2 train \
+    -i S1.fa S2.fa S3.fa \
+    --data S1/data.csv S2/data.csv S3/data.csv \
+    --data-split S1/data_split.csv S2/data_split.csv S3/data_split.csv \
+    -c S1/cannot.txt S2/cannot.txt S3/cannot.txt \
+    --mode several \
+    -o S1_output
 ```
 
-Each sample is binned independently.
-This step is relatively fast.
+更多内容见 [training](training.md)。
 
+---
 
-## Running SemiBin in semi-supervised mode
+## 完整的 DNABERT 多模态流程
 
-**Note⚠️**: This is generally not needed as semi-supervised mode is not recommended anymore!
+DNABERT 分支需要预先生成 DNABERT-S 嵌入。整体流程为：**生成序列特征 → 用 `generate_berts.py` 产出 whole 与 split 两份嵌入 → 训练 + 分箱**。
 
-See the [semi-supervised mode](semi-supervised) page for more information.
+### 前置：获取 DNABERT-S 权重
 
-## Running SemiBin with strobealign-aemb
+DNABERT-S 预训练权重较大，已被 gitignore，**不随仓库分发**。请单独获取后放到 `SemiBin/DNABERT-S/`，或在命令中用 `--dnabert-model` / `-md` 指定路径。
+来源：<https://github.com/MAGICS-LAB/DNABERT_S>
 
-This has its own [dedicated page](aemb).
+### 步骤 1：生成序列特征
+
+先生成 `data.csv` 与 `data_split.csv`（DNABERT 嵌入的行序必须与它们一致）：
+
+```bash
+SemiBin2 generate_sequence_features_single -i S1.fa -b S1.sorted.bam -o output
+```
+
+> split 的 contig 命名形如 `h_1` / `h_2`（见 `generate_kmer.py`）。原始 FASTA 中没有这些 split 半段，因此推荐用 `generate_berts.py` 显式生成 split 嵌入，而不是依赖 `single_easy_bin` / `multi_easy_bin` 内置的自动提取（其对 split 半段有局限）。
+
+### 步骤 2：用 `generate_berts.py` 生成 whole + split 嵌入
+
+需要 `whole.fasta`（整条 contig）与 `split.fasta`（split 半段）两份输入。whole 与 split **共享同一个 PCA basis**（在 whole 上 fit，对 split 用 transform）：
+
+```bash
+python SemiBin/generate_berts.py -md /path/DNABERT-S \
+  -fd whole.fasta -nd output/dnabert_contig_names.txt -dd output/dnabert_embedding.npy \
+  -sfd split.fasta -snd output/dnabert_split_contig_names.txt -sdd output/dnabert_split_embedding.npy
+```
+
+要点：
+
+- 输出文件名**必须**是 `dnabert_embedding.npy` 与 `dnabert_split_embedding.npy`，并放在 `data.csv` 同一目录下。
+- 两份 FASTA 的行序必须与 `data.csv` / `data_split.csv` 一致（`load_multimodal_embeddings` 会逐行校验）。
+- 推理采用批量 + attention_mask 掩码均值池化。
+
+### 步骤 3：训练 + 分箱
+
+嵌入就位后，正常运行短读长多模态流程即可（默认启用多模态，会自动加载同目录下的 DNABERT 嵌入）：
+
+```bash
+SemiBin2 single_easy_bin \
+        --self-supervised \
+        --dnabert-model /path/DNABERT-S \
+        --fusion-weights-multimodal 0.45 0.15 0.15 0.25 \
+        -i S1.fa \
+        -b S1.sorted.bam \
+        -o output
+```
+
+如需指定运行 DNABERT 推理的 Python 解释器，可用 `--dnabert-python`（或设置环境变量 `SEMIBIN_DNABERT_PYTHON`）。
+
+> 使用了 DNABERT 时，请额外引用 DNABERT-S。
+
+---
+
+## 半监督模式
+
+> ⚠️ 注意：半监督模式已不再推荐，通常无需使用。
+
+详见 [semi-supervised](semi-supervised.md)。
+
+## 配合 strobealign-aemb
+
+见专门的 [aemb](aemb.md) 页面。
+
+---
+
+## 引用
+
+如果你使用了本工具，请引用上游 SemiBin：
+
+- Pan et al., *Nat Commun* 13, 2326 (2022). <https://doi.org/10.1038/s41467-022-29843-y>
+- Pan et al., *Bioinformatics* 39(Suppl_1): i21–i29 (2023). <https://doi.org/10.1093/bioinformatics/btad209>
+
+如果使用了 DNABERT 分支，请额外引用 DNABERT-S。
