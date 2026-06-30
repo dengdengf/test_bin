@@ -89,6 +89,34 @@ def cal_kl(m, v, use_ne='auto'):
     return v_div
 
 
+def _coabundance_edge_similarity(abundance, n_sample, rows, cols):
+    """Variance-aware co-abundance similarity for each (rows[k], cols[k]) edge.
+
+    Restores the KL-divergence depth signal that upstream SemiBin multiplies into the
+    clustering graph (and which the multi-view fusion had dropped). The abundance block
+    is laid out as (mean, variance) column pairs per sample; for a pair of contigs the
+    per-sample symmetric Gaussian divergence is averaged across samples and mapped to a
+    similarity in (0, 1]: contigs that co-vary in coverage keep their edge, contigs whose
+    depth profiles diverge get their edge suppressed. Computed only on the surviving
+    edges, so it never materialises the dense N*N matrix the upstream version did.
+    """
+    rows = np.asarray(rows)
+    cols = np.asarray(cols)
+    if len(rows) == 0 or n_sample <= 0 or abundance.shape[1] < 2 * n_sample:
+        return np.ones(len(rows), dtype=np.float32)
+    acc = np.zeros(len(rows), dtype=np.float64)
+    for k in range(n_sample):
+        m = abundance[:, 2 * k].astype(np.float64)
+        v = np.clip(abundance[:, 2 * k + 1].astype(np.float64), 1.0, None)
+        mi, mj = m[rows], m[cols]
+        vi, vj = v[rows], v[cols]
+        kl_ij = (np.log(vj) - np.log(vi)) / 2 + ((mi - mj) ** 2 + vi) / (2 * vj) - 0.5
+        kl_ji = (np.log(vi) - np.log(vj)) / 2 + ((mj - mi) ** 2 + vj) / (2 * vi) - 0.5
+        acc += np.clip((kl_ij + kl_ji) / 2, 1e-6, 1 - 1e-6)
+    sim = 1.0 - acc / n_sample
+    return np.clip(sim, 1e-6, 1.0).astype(np.float32)
+
+
 def _prepare_feature_views(data, is_combined):
     from .utils import norm_abundance
     from sklearn.preprocessing import normalize
@@ -109,7 +137,11 @@ def _prepare_feature_views(data, is_combined):
 
 def run_embed_infomap(logger, model, data, *,
             device, max_edges, max_node, is_combined, n_sample, contig_dict,
-            num_process: int, random_seed, dnabert_embedding=None):
+            num_process: int, random_seed, dnabert_embedding=None,
+            knn_kernel='median',
+            weights_base=(0.60, 0.25, 0.15),
+            weights_multimodal=(0.45, 0.15, 0.15, 0.25),
+            use_coabundance_kl=True):
     """
     Cluster contigs into bins
     """
@@ -147,26 +179,28 @@ def run_embed_infomap(logger, model, data, *,
         if dnabert_embedding is not None else None
     )
 
-    embedding_graph = build_similarity_graph(embedding, max_edges, num_process)
-    composition_graph = build_similarity_graph(composition, max_edges, num_process)
-    abundance_graph = build_similarity_graph(abundance, max_edges, num_process)
-    dna_graph = build_similarity_graph(dnabert_embedding, max_edges, num_process)
+    embedding_graph = build_similarity_graph(embedding, max_edges, num_process, kernel=knn_kernel)
+    composition_graph = build_similarity_graph(composition, max_edges, num_process, kernel=knn_kernel)
+    abundance_graph = build_similarity_graph(abundance, max_edges, num_process, kernel=knn_kernel)
+    dna_graph = build_similarity_graph(dnabert_embedding, max_edges, num_process, kernel=knn_kernel)
 
     if dnabert_embedding is not None:
+        w = weights_multimodal
         graph_specs = [
-            (embedding_graph, 0.45),
-            (composition_graph, 0.15),
-            (abundance_graph, 0.15),
-            (dna_graph, 0.25),
+            (embedding_graph, w[0]),
+            (composition_graph, w[1]),
+            (abundance_graph, w[2]),
+            (dna_graph, w[3]),
         ]
-        logger.info('Running multimodal graph fusion for initial clustering.')
+        logger.info(f'Running multimodal graph fusion for initial clustering (weights={tuple(w)}, kernel={knn_kernel}).')
     else:
+        w = weights_base
         graph_specs = [
-            (embedding_graph, 0.60),
-            (composition_graph, 0.25),
-            (abundance_graph, 0.15),
+            (embedding_graph, w[0]),
+            (composition_graph, w[1]),
+            (abundance_graph, w[2]),
         ]
-        logger.info('Running composition-abundance graph fusion for initial clustering.')
+        logger.info(f'Running composition-abundance graph fusion for initial clustering (weights={tuple(w)}, kernel={knn_kernel}).')
 
     embedding_matrix = fuse_similarity_graphs(graph_specs)
     embedding_matrix = prune_graph_by_quantile(embedding_matrix, max_node)
@@ -183,6 +217,13 @@ def run_embed_infomap(logger, model, data, *,
     if not len(edges):
         logger.warning('No graph edges remained after fusion; assigning each contig to its own bin.')
         return embedding, np.arange(num_contigs, dtype=int)
+
+    if use_coabundance_kl and not is_combined and n_sample and n_sample > 0:
+        raw_abundance = data.values[:, 136:].astype(np.float32)
+        if raw_abundance.shape[1] >= 2 * n_sample:
+            kl_sim = _coabundance_edge_similarity(raw_abundance, n_sample, X, Y)
+            edge_weights = edge_weights * kl_sim
+            logger.debug('Applied co-abundance KL modulation to clustering edge weights.')
 
     logger.debug(f'Running infomap with {num_process} processes...')
     g = Graph()
@@ -452,7 +493,11 @@ def cluster(logger, model, data, device, is_combined,
             is_combined=is_combined, n_sample=n_sample,
             contig_dict=contig_dict, num_process=args.num_process,
             random_seed=args.random_seed,
-            dnabert_embedding=dnabert_embedding)
+            dnabert_embedding=dnabert_embedding,
+            knn_kernel=getattr(args, 'knn_kernel', 'median'),
+            weights_base=tuple(getattr(args, 'fusion_weights_base', None) or (0.60, 0.25, 0.15)),
+            weights_multimodal=tuple(getattr(args, 'fusion_weights_multimodal', None) or (0.45, 0.15, 0.15, 0.25)),
+            use_coabundance_kl=not getattr(args, 'no_coabundance_kl', False))
 
     if args.write_pre_reclustering_bins or not args.recluster:
         output_bin_path = os.path.join(out,

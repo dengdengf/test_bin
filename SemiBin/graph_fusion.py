@@ -3,10 +3,24 @@ from scipy import sparse
 from sklearn.neighbors import kneighbors_graph
 
 
-def _distance_to_similarity(graph):
+def _distance_to_similarity(graph, kernel='median'):
     graph = graph.tocsr().astype(np.float32)
     if graph.nnz == 0:
         return graph
+    if kernel == 'local':
+        # Self-tuning local scaling (Zelnik-Manor & Perona, 2004): every node i gets its
+        # own bandwidth sigma_i (distance to its furthest retained neighbour) and edge
+        # (i, j) is scaled by sigma_i * sigma_j. This adapts to varying local density far
+        # better than a single global median when genomes differ in coverage/abundance.
+        sigma_i = np.asarray(graph.max(axis=1).todense()).ravel()
+        fallback = float(np.median(graph.data)) or 1.0
+        sigma_i[sigma_i <= 0] = fallback
+        coo = graph.tocoo()
+        denom = sigma_i[coo.row] * sigma_i[coo.col]
+        denom[denom <= 0] = 1e-6
+        sim = np.exp(-(coo.data ** 2) / denom).astype(np.float32)
+        out = sparse.csr_matrix((sim, (coo.row, coo.col)), shape=graph.shape)
+        return symmetrize_graph(out)
     sigma = float(np.median(graph.data))
     if sigma <= 0:
         sigma = float(np.mean(graph.data) + 1e-6)
@@ -18,7 +32,7 @@ def symmetrize_graph(graph):
     return graph.maximum(graph.T).tocsr()
 
 
-def build_similarity_graph(features, n_neighbors, num_process):
+def build_similarity_graph(features, n_neighbors, num_process, kernel='median'):
     if features is None or features.shape[1] == 0 or features.shape[0] <= 1:
         return None
     graph = kneighbors_graph(
@@ -28,7 +42,7 @@ def build_similarity_graph(features, n_neighbors, num_process):
         p=2,
         n_jobs=num_process,
     )
-    return _distance_to_similarity(graph)
+    return _distance_to_similarity(graph, kernel=kernel)
 
 
 def normalize_graph(graph):

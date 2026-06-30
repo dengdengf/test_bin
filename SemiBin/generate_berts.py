@@ -11,23 +11,51 @@ from sklearn.decomposition import PCA
 # ----------------------------------------------------------------
 # 参数设置
 # ----------------------------------------------------------------
-parser = argparse.ArgumentParser(description="基于DNABERT提取特征并降维 (全量提取，无长度过滤)")
-parser.add_argument('-md', '--model_dir', type=str, required=True, help="指定模型路径 (包含 config.json, pytorch_model.bin 等)")
-parser.add_argument('-fd', '--fasta_file', type=str, required=True, help="指定输入 FASTA 序列路径")
-parser.add_argument('-nd', '--names_file', type=str, required=True, help="输出的 contig 名称文件路径 (.txt)")
-parser.add_argument('-dd', '--fpf_file', type=str, required=True, help="输出的特征文件路径 (.npy)")
+# 用法 1 (旧行为, 向后兼容): 只给 whole 的三个参数 -> 对该 fasta 提特征 + PCA 后保存。
+# 用法 2 (方案 A, 推荐): 额外给 split 的三个参数 -> whole 与 split 一次跑完, 且 split 复用
+#         whole 拟合出的同一个 PCA basis, 保证两者在同一坐标系 (对比学习才可比)。
+#
+# 注: split contig 的名称形如 h_1 / h_2 (见 generate_kmer.py), 它们不在原始 contig fasta 里,
+#     所以 split fasta 需要是含这些半段序列的文件, 与 data_split.csv 的行顺序一致。
+# (注释掉的旧版本已删除, 可用 `git show HEAD:SemiBin/generate_berts.py` 找回。)
+# ----------------------------------------------------------------
+parser = argparse.ArgumentParser(
+    description="基于DNABERT提取特征并降维 (全量提取, 无长度过滤; 支持 whole+split 共享 PCA basis)")
+parser.add_argument('-md', '--model_dir', type=str, required=True,
+                    help="指定模型路径 (包含 config.json, pytorch_model.bin 等)")
+parser.add_argument('-fd', '--fasta_file', type=str, required=True,
+                    help="whole contig 的 FASTA 路径 (与 data.csv 对应)")
+parser.add_argument('-nd', '--names_file', type=str, required=True,
+                    help="whole 的 contig 名称输出文件 (.txt)")
+parser.add_argument('-dd', '--fpf_file', type=str, required=True,
+                    help="whole 的特征输出文件 (.npy)")
+# --- 可选: split contig 一并提取, 与 whole 共享同一个 PCA basis ---
+parser.add_argument('-sfd', '--split_fasta_file', type=str, default=None,
+                    help="(可选) split contig 的 FASTA 路径 (与 data_split.csv 对应, 名称形如 h_1/h_2)")
+parser.add_argument('-snd', '--split_names_file', type=str, default=None,
+                    help="(可选) split 的 contig 名称输出文件 (.txt)")
+parser.add_argument('-sdd', '--split_fpf_file', type=str, default=None,
+                    help="(可选) split 的特征输出文件 (.npy)")
+# --- 可选: 性能 / 维度参数, 默认值保持原行为 ---
+parser.add_argument('--batch_size', type=int, default=8,
+                    help="批量推理 batch 大小 (默认 8; 设为 1 即逐条提取, 复现旧行为)")
+parser.add_argument('--max_length', type=int, default=5000,
+                    help="tokenizer 截断长度 (默认 5000)")
+parser.add_argument('--target_dim', type=int, default=128,
+                    help="PCA 目标维度 (默认 128)")
 args = parser.parse_args()
+
+if (args.split_fasta_file is not None) and (args.split_names_file is None or args.split_fpf_file is None):
+    print("错误: 提供了 --split_fasta_file 时, 必须同时提供 --split_names_file 和 --split_fpf_file。")
+    exit(1)
 
 # ----------------------------------------------------------------
 # 初始化环境与模型
 # ----------------------------------------------------------------
-# 设置设备
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
 
-# 路径处理
 model_dir = Path(args.model_dir).resolve()
-
 print(f"正在加载模型: {model_dir} ...")
 try:
     tokenizer = AutoTokenizer.from_pretrained(str(model_dir), trust_remote_code=True, local_files_only=True)
@@ -35,233 +63,135 @@ try:
 except Exception as e:
     print(f"模型加载失败: {e}")
     exit(1)
+model.eval()
+
+
+def read_fasta(path):
+    """读取 FASTA, 返回 (names, seqs), 顺序严格一致。"""
+    names, seqs = [], []
+    for record in tqdm(SeqIO.parse(path, "fasta"), desc=f"读取 {Path(path).name}"):
+        names.append(record.id)
+        seqs.append(str(record.seq))
+    return names, seqs
+
+
+def encode_sequences(seqs):
+    """批量提取 DNABERT mean-pooling 特征。
+
+    用 attention_mask 做掩码平均, 使 padding token 不污染嵌入 —— 这样批量(padding)的
+    逐条结果与旧版 (batch=1, 无 padding) 在数值上保持一致, 只是更快。
+    """
+    if len(seqs) == 0:
+        return np.zeros((0, 0), dtype=np.float32)
+    feature_list = []
+    for start in tqdm(range(0, len(seqs), args.batch_size), desc="特征提取中"):
+        batch = seqs[start:start + args.batch_size]
+        enc = tokenizer(
+            batch,
+            return_tensors='pt',
+            padding="longest",
+            max_length=args.max_length,
+            truncation=True,
+        )
+        input_ids = enc["input_ids"].to(device)
+        attention_mask = enc.get("attention_mask")
+        if attention_mask is not None:
+            attention_mask = attention_mask.to(device)
+        with torch.no_grad():
+            try:
+                # 传入 attention_mask 让 padding 不参与注意力 (标准 BERT forward 支持)
+                if attention_mask is not None:
+                    hidden_states = model(input_ids, attention_mask=attention_mask)[0]
+                else:
+                    hidden_states = model(input_ids)[0]
+            except TypeError:
+                # 某些自定义 DNABERT 实现的 forward 不接受 attention_mask, 退回原始调用
+                hidden_states = model(input_ids)[0]
+        if attention_mask is not None:
+            mask = attention_mask.unsqueeze(-1).type_as(hidden_states)
+            summed = (hidden_states * mask).sum(dim=1)
+            counts = mask.sum(dim=1).clamp(min=1.0)
+            batch_emb = summed / counts
+        else:
+            batch_emb = hidden_states.mean(dim=1)
+        feature_list.append(batch_emb.detach().cpu().numpy())
+    return np.concatenate(feature_list, axis=0).astype(np.float32)
+
+
+def save_names(path, names):
+    with open(path, 'w', encoding='utf-8') as f:
+        for name in names:
+            f.write(f"{name}\n")
+
 
 # ----------------------------------------------------------------
-# Step 1: 读取序列 (直接读入内存，不产生中间文件)
+# Step 1+2: 读取并提取 whole contig 特征
 # ----------------------------------------------------------------
-seq_list = []       # 存放序列内容
-contig_names = []   # 存放序列名称
-
-print(f"正在读取 FASTA 文件: {args.fasta_file} ...")
-# 使用 SeqIO 解析，确保名称和序列顺序严格一致
-for record in tqdm(SeqIO.parse(args.fasta_file, "fasta"), desc="读取进度"):
-    # 1. 保存名称 (record.id)
-    contig_names.append(record.id)
-    # 2. 保存序列 (转为字符串)
-    seq_list.append(str(record.seq))
-
-print(f"共读取到 {len(seq_list)} 条序列。")
-
-if len(seq_list) == 0:
-    print("错误：输入文件没有包含任何序列。")
+start_time = time.time()
+print(f"正在读取 whole FASTA: {args.fasta_file} ...")
+whole_names, whole_seqs = read_fasta(args.fasta_file)
+print(f"共读取到 {len(whole_seqs)} 条 whole 序列。")
+if len(whole_seqs) == 0:
+    print("错误: whole 输入文件没有包含任何序列。")
     exit(1)
 
-# ----------------------------------------------------------------
-# Step 2: 提取特征
-# ----------------------------------------------------------------
-feature_list = []
-start_time = time.time()
-
-print("开始提取特征...")
-model.eval() # 切换到评估模式
-
-# 遍历内存中的序列列表
-for seq in tqdm(seq_list, desc="特征提取中"):
-    # Tokenize
-    try:
-        inputs = tokenizer(seq, 
-                        return_tensors='pt',
-                        padding="longest",
-                        max_length=5000,
-                        truncation=True)["input_ids"]
-        inputs = inputs.to(device)
-        
-        # Forward pass
-        with torch.no_grad():
-            hidden_states = model(inputs)[0] # [1, sequence_length, 768]
-            # Mean pooling: 对序列维度的特征取平均
-            embedding_mean = torch.mean(hidden_states[0], dim=0)
-            feature_list.append(embedding_mean.detach().cpu().numpy())
-            
-    except Exception as e:
-        print(f"\n处理序列时发生错误: {e}")
-        # 即使出错也要保持对齐，可以用全0向量填充，或者直接报错退出。
-        # 这里选择报错退出以保证数据严谨性
-        exit(1)
+whole_features = encode_sequences(whole_seqs)
+print(f"\nwhole 原始特征矩阵形状: {whole_features.shape}")
 
 # ----------------------------------------------------------------
-# Step 3: PCA 降维
+# Step 3: 在 whole 上拟合 PCA (basis), 供 split 复用
 # ----------------------------------------------------------------
-features_array = np.stack(feature_list)
-print(f"\n原始特征矩阵形状: {features_array.shape}")
+target_dim = args.target_dim
+n_samples, n_features = whole_features.shape
+n_components = min(target_dim, n_samples, n_features)
 
-# 动态调整 PCA 维度（防止序列数少于 128 时报错）
-target_dim = 128
-n_samples = features_array.shape[0]
-n_components = min(target_dim, n_samples)
+reducer = None
+if n_samples < 2 or n_components >= n_features:
+    # 样本太少无法拟合 PCA, 或维度已不超过目标 -> 不降维, 直接用原始特征
+    print(f"跳过 PCA (样本数={n_samples}, 特征维={n_features}, 目标维={target_dim}), 输出原始维度。")
+    reduced_whole = whole_features
+else:
+    if n_components < target_dim:
+        print(f"警告: 样本数量 ({n_samples}) 少于目标维度 {target_dim}, PCA 维度自动调整为 {n_components}")
+    print(f"正在进行 PCA 降维 (目标维度: {n_components}) ...")
+    reducer = PCA(n_components=n_components)
+    reduced_whole = reducer.fit_transform(whole_features).astype(np.float32)
+    print(f"PCA 解释方差比 (Total): {np.sum(reducer.explained_variance_ratio_):.4f}")
 
-if n_components < target_dim:
-    print(f"警告：样本数量 ({n_samples}) 少于目标维度 128，PCA 维度自动调整为 {n_components}")
-
-print(f"正在进行 PCA 降维 (目标维度: {n_components})...")
-pca = PCA(n_components=n_components)
-reduced_features = pca.fit_transform(features_array)
-
-print(f"降维后特征矩阵形状: {reduced_features.shape}")
-print(f"PCA 解释方差比 (Total): {np.sum(pca.explained_variance_ratio_):.4f}")
+out_dim = reduced_whole.shape[1]
+print(f"whole 降维后特征矩阵形状: {reduced_whole.shape}")
 
 # ----------------------------------------------------------------
-# Step 4: 保存结果
+# Step 4: 保存 whole 结果
 # ----------------------------------------------------------------
-print("正在保存文件...")
+np.save(args.fpf_file, reduced_whole)
+save_names(args.names_file, whole_names)
+print(f"whole 特征已保存: {args.fpf_file} (名称: {args.names_file})")
 
-# 1. 保存特征 (.npy)
-np.save(args.fpf_file, reduced_features)
-
-# 2. 保存名称列表 (.txt)
-# 确保顺序与 feature_list 也就是 reduced_features 严格对应
-with open(args.names_file, 'w', encoding='utf-8') as f:
-    for name in contig_names:
-        f.write(f"{name}\n")
+# ----------------------------------------------------------------
+# Step 5 (可选): 用同一个 PCA basis 提取 split contig
+# ----------------------------------------------------------------
+if args.split_fasta_file is not None:
+    print(f"正在读取 split FASTA: {args.split_fasta_file} ...")
+    split_names, split_seqs = read_fasta(args.split_fasta_file)
+    print(f"共读取到 {len(split_seqs)} 条 split 序列。")
+    split_features = encode_sequences(split_seqs)
+    if split_features.shape[0] == 0:
+        reduced_split = np.zeros((0, out_dim), dtype=np.float32)
+    elif reducer is None:
+        # whole 未降维, split 也保持原始维度 (两者同在原始 768 维空间)
+        reduced_split = split_features.astype(np.float32)
+    else:
+        # 关键: 用 whole 拟合出的 reducer.transform, 保证 whole 与 split 共享同一 PCA basis
+        reduced_split = reducer.transform(split_features).astype(np.float32)
+    np.save(args.split_fpf_file, reduced_split)
+    save_names(args.split_names_file, split_names)
+    print(f"split 特征已保存: {args.split_fpf_file} (名称: {args.split_names_file}); 形状: {reduced_split.shape}")
 
 end_time = time.time()
 print("-" * 30)
-print(f"处理完成！耗时: {end_time - start_time:.2f} 秒")
-print(f"特征文件已保存至: {args.fpf_file}")
-print(f"名称列表已保存至: {args.names_file}")
-print(f"两条数检查: 名称数={len(contig_names)}, 特征数={len(reduced_features)}")
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# import argparse
-# import time
-# from pathlib import Path
-
-# import torch
-# import numpy as np
-# import pandas as pd
-# from Bio import SeqIO
-# from transformers import AutoTokenizer, AutoModel
-# from tqdm import tqdm
-# # !!! 新增的导入: 用于降维 !!!
-# from sklearn.decomposition import PCA 
-
-
-# # 设置参数
-# parser = argparse.ArgumentParser(description="用于特征提取:model_dir、seq.txt、feature_output.npy")
-# parser.add_argument('-md','--model_dir',type=str,help="指定模型路径")
-# parser.add_argument('-fd','--fasta_file',type=str,help="指定输入序列路径")
-# parser.add_argument('-sd','--seq_file',type=str,help="提取序列路径")
-# parser.add_argument('-cf', '--contig_names_file', type=str, help="提取的contig名称路径")
-# parser.add_argument('-dd','--fpf_file',type=str,help="指定特征输出路径")
-# parser.add_argument('--csv_file', type=str, help="指定CSV输出路径") # 提示用户此处是CSV
-# args = parser.parse_args()
-
-# # 设置设备为GPU（如果可用）
-# device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-# print(f"Using device: {device}")
-
-# # 统一解析模型目录为绝对路径（支持相对路径）
-# model_dir = Path(args.model_dir).resolve()
-
-# tokenizer = AutoTokenizer.from_pretrained(str(model_dir), trust_remote_code=True, local_files_only=True)
-# model = AutoModel.from_pretrained(str(model_dir), trust_remote_code=True).to(device)
-
-# # Step 1: 筛选长度大于等于2000的序列，并保存名字和序列
-# contig_names_list_temp = []
-# with open(args.seq_file, "w") as seq_output_file, open(args.contig_names_file, "w") as contig_names_output_file:
-#     for record in tqdm(SeqIO.parse(args.fasta_file, "fasta")):
-#         seq = str(record.seq)
-#         if len(seq) >= 2000:
-#             # 保存序列
-#             seq_output_file.write(f">{record.id}\n{seq}\n")
-#             # 保存contig名称（序列的标识符）
-#             contig_names_output_file.write(record.id + '\n')  # record.id 是序列名称
-#             contig_names_list_temp.append(record.id) # 提前收集contig name，避免重复读取
-
-# time.sleep(5)
-
-
-# # Step 2 & 3: 读取序列文件和contig_names文件
-# # 读取序列文件（通常包含FASTA格式的头和序列行）
-# with open(args.seq_file, "r", encoding="UTF-8") as f:
-#     # 过滤掉FASTA头行，只保留序列行
-#     seq_lines = [line for line in f.read().splitlines() if not line.startswith(">")]
-
-# # 读取contig_names文件
-# with open(args.contig_names_file, "r", encoding="UTF-8") as f:
-#     contig_names = f.read().splitlines()
-
-
-# feature_list = []
-# start_time = time.time()
-# for seq in tqdm(seq_lines,desc = "正在提取特征......"):
-#     inputs = tokenizer(seq, 
-#                        return_tensors = 'pt',
-#                        padding="longest",
-#                        max_length=5000,
-#                        truncation=True,)["input_ids"]
-#     inputs = inputs.to(device)  # 将输入数据移动到GPU
-#     with torch.no_grad():  # 禁用梯度计算以节省内存
-#         hidden_states = model(inputs)[0] # [1, sequence_length, 768]
-#         # embedding with mean pooling
-#         embedding_mean = torch.mean(hidden_states[0], dim=0)
-#         feature_list.append(embedding_mean.detach().cpu().numpy())
-
-
-# # ----------------------------------------------------
-# # 步骤 4: 降维处理 (保持不变)
-# # ----------------------------------------------------
-# # 将特征列表转换为 NumPy 数组 (形状: N x 768)
-# features_array = np.stack(feature_list)
-
-# # 检查 contig_names 和特征数量是否匹配
-# assert len(contig_names) == len(features_array), "contig_names 和特征数量不匹配！"
-
-# print("\n--- 降维信息 ---")
-# print(f"原始特征维度: {features_array.shape}")
-
-# # 初始化 PCA，目标维度设置为 128
-# pca = PCA(n_components=128)
-
-# # 对特征进行拟合和转换，得到降维后的特征
-# reduced_features = pca.fit_transform(features_array)
-
-# print(f"降维后的特征维度: {reduced_features.shape}")
-# print(f"PCA 解释的方差比例 (前128维): {np.sum(pca.explained_variance_ratio_):.4f}")
-# print("----------------")
-
-
-# # ----------------------------------------------------
-# # 步骤 5: 保存降维后的特征 (已修改为 CSV)
-# # ----------------------------------------------------
-
-# # 使用降维后的特征进行保存 (.npy 文件)
-# np.save(args.fpf_file, reduced_features)
-
-# # 转换为 pandas DataFrame
-# features_df = pd.DataFrame(reduced_features)
-
-# # 将 contig_name 列添加到特征中，保证与序列一一对应
-# features_df['contig_name'] = contig_names  
-
-# # !!! 使用 .to_csv() 保存为 CSV 格式 !!!
-# features_df.to_csv(args.csv_file, index=False)
-
-# end_time = time.time()
-# print("提取和降维特征耗费时间：%d 秒" %(end_time-start_time))
-# print(f"PCA 解释的方差比例 (前128维): {np.sum(pca.explained_variance_ratio_):.4f}")
-# print(f"成功保存 {len(feature_list)} 条序列的 128 维特征到 CSV 和 NumPy 文件。")
+print(f"处理完成! 耗时: {end_time - start_time:.2f} 秒")
+print(f"whole: 名称数={len(whole_names)}, 特征数={len(reduced_whole)}")
+if args.split_fasta_file is not None:
+    print(f"split: 名称数={len(split_names)}, 特征数={len(reduced_split)}")
+    print(f"whole 与 split 已共享同一 PCA basis (维度均为 {out_dim})。")

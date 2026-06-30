@@ -146,15 +146,20 @@ def contrastive_loss(embedding1, embedding2, label):
 
 
 def alignment_loss(left_out, right_out):
+    # Align the composition / abundance branches TOWARD the DNABERT branch, but treat the
+    # DNABERT embedding as a fixed target via stop-gradient (.detach()). Without the detach
+    # the symmetric MSE pulls every branch toward a moving mean, which lets the encoders
+    # collapse modality-specific signal into whatever the DNA branch happens to emit. With
+    # the detach, DNABERT acts as a stable anchor and only the weaker modalities are nudged.
     mse = torch.nn.MSELoss()
     losses = [
-        mse(left_out['composition'], left_out['dna']),
-        mse(right_out['composition'], right_out['dna']),
+        mse(left_out['composition'], left_out['dna'].detach()),
+        mse(right_out['composition'], right_out['dna'].detach()),
     ]
     if left_out.get('has_abundance', False):
         losses.extend([
-            mse(left_out['abundance'], left_out['dna']),
-            mse(right_out['abundance'], right_out['dna']),
+            mse(left_out['abundance'], left_out['dna'].detach()),
+            mse(right_out['abundance'], right_out['dna'].detach()),
         ])
     return sum(losses) / len(losses)
 

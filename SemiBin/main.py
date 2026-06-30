@@ -561,6 +561,37 @@ def parse_args(args):
                           default=1,
                           help='Fraction of contigs that considered to be binned (should be between 0 and 1; default: 1).')
 
+        g.add_argument('--knn-kernel',
+                          required=False,
+                          choices=['median', 'local'],
+                          default='median',
+                          dest='knn_kernel',
+                          help='Kernel converting kNN distances to similarities in graph fusion: "median" (global median bandwidth, default) or "local" (self-tuning local scaling).')
+
+        g.add_argument('--fusion-weights',
+                          required=False,
+                          type=float,
+                          nargs=3,
+                          default=None,
+                          dest='fusion_weights_base',
+                          metavar=('EMB', 'COMP', 'ABUND'),
+                          help='Fusion weights for embedding/composition/abundance views when DNABERT is not used (default: 0.60 0.25 0.15).')
+
+        g.add_argument('--fusion-weights-multimodal',
+                          required=False,
+                          type=float,
+                          nargs=4,
+                          default=None,
+                          dest='fusion_weights_multimodal',
+                          metavar=('EMB', 'COMP', 'ABUND', 'DNA'),
+                          help='Fusion weights for embedding/composition/abundance/DNABERT views in multimodal mode (default: 0.45 0.15 0.15 0.25).')
+
+        g.add_argument('--no-coabundance-kl',
+                          required=False,
+                          action='store_true',
+                          dest='no_coabundance_kl',
+                          help='Disable the variance-aware co-abundance (KL) modulation of clustering edges in multi-sample mode.')
+
         g.add_argument('--no-recluster',
                            required=False,
                            help='Do not recluster bins.',
@@ -1406,36 +1437,62 @@ SPLIT_OUTPUT = r"{split_output_npy_path}"
 SPLIT_NAMES = r"{split_output_names_path}"
 TARGET_DIM = 128
 MAX_LENGTH = 5000
+BATCH_SIZE = 8
 
 def encode_sequences(model, tokenizer, seq_names, seq_dict, device):
     if not seq_names:
         return np.zeros((0, 0), dtype=np.float32)
     features = []
-    for name in tqdm(seq_names):
-        seq = seq_dict.get(name)
-        if seq is None:
-            raise RuntimeError(f"Contig {{name}} missing in FASTA.")
-        inputs = tokenizer(
-            seq,
+    for start in tqdm(range(0, len(seq_names), BATCH_SIZE)):
+        batch_names = seq_names[start:start + BATCH_SIZE]
+        batch_seqs = []
+        for name in batch_names:
+            seq = seq_dict.get(name)
+            if seq is None:
+                raise RuntimeError("Contig " + str(name) + " missing in FASTA.")
+            batch_seqs.append(seq)
+        enc = tokenizer(
+            batch_seqs,
             return_tensors='pt',
             padding='longest',
             max_length=MAX_LENGTH,
             truncation=True,
-        )['input_ids'].to(device)
+        )
+        input_ids = enc['input_ids'].to(device)
+        attention_mask = enc.get('attention_mask')
         with torch.no_grad():
-            hidden_states = model(inputs)[0]
-            embedding_mean = torch.mean(hidden_states[0], dim=0)
-        features.append(embedding_mean.detach().cpu().numpy())
-    return np.stack(features).astype(np.float32)
+            hidden_states = model(input_ids)[0]
+            if attention_mask is not None:
+                # Mean-pool over real tokens only, so right-padding does not dilute the
+                # embedding (critical now that sequences are batched and padded together).
+                mask = attention_mask.to(device).unsqueeze(-1).type_as(hidden_states)
+                summed = (hidden_states * mask).sum(dim=1)
+                counts = mask.sum(dim=1).clamp(min=1.0)
+                batch_emb = summed / counts
+            else:
+                batch_emb = hidden_states.mean(dim=1)
+        features.append(batch_emb.detach().cpu().numpy())
+    return np.concatenate(features, axis=0).astype(np.float32)
 
-def reduce_dim(features):
+def fit_reducer(features, target_dim):
+    # Fit the PCA ONCE on the whole-contig features and reuse it for the split contigs so
+    # both live in the SAME basis -- otherwise the contrastive loss compares embeddings
+    # from two unrelated PCA coordinate systems.
     if features.shape[0] == 0:
-        return features
-    n_components = min(TARGET_DIM, features.shape[0], features.shape[1])
-    if n_components == features.shape[1]:
-        return features
+        return None, features
+    n_components = min(target_dim, features.shape[0], features.shape[1])
+    if n_components >= features.shape[1]:
+        return None, features.astype(np.float32)
     reducer = PCA(n_components=n_components)
-    return reducer.fit_transform(features).astype(np.float32)
+    reduced = reducer.fit_transform(features).astype(np.float32)
+    return reducer, reduced
+
+def apply_reducer(reducer, features, out_dim):
+    if features.shape[0] == 0:
+        return np.zeros((0, out_dim), dtype=np.float32)
+    if reducer is None:
+        return features.astype(np.float32)
+    return reducer.transform(features).astype(np.float32)
 
 def save_names(path, names):
     with open(path, 'w', encoding='utf-8') as handle:
@@ -1462,27 +1519,18 @@ def main():
 
     print(f"[DNABERT] Extracting {{len(whole_names)}} whole-contig embeddings...")
     whole_features = encode_sequences(model, tokenizer, whole_names, seq_dict, device)
-    reduced_whole = reduce_dim(whole_features)
+    reducer, reduced_whole = fit_reducer(whole_features, TARGET_DIM)
+    out_dim = reduced_whole.shape[1] if reduced_whole.shape[0] else TARGET_DIM
     np.save(WHOLE_OUTPUT, reduced_whole)
     save_names(WHOLE_NAMES, whole_names)
 
     if split_names:
         print(f"[DNABERT] Extracting {{len(split_names)}} split-contig embeddings...")
         split_features = encode_sequences(model, tokenizer, split_names, seq_dict, device)
-        if split_features.shape[0] == 0:
-            reduced_split = np.zeros((0, reduced_whole.shape[1]), dtype=np.float32)
-        else:
-            target_dim = reduced_whole.shape[1]
-            n_components = min(target_dim, split_features.shape[0], split_features.shape[1])
-            if n_components == split_features.shape[1] and split_features.shape[1] == target_dim:
-                reduced_split = split_features.astype(np.float32)
-            else:
-                reduced_split = PCA(n_components=n_components).fit_transform(split_features).astype(np.float32)
-                if reduced_split.shape[1] < target_dim:
-                    pad = np.zeros((reduced_split.shape[0], target_dim - reduced_split.shape[1]), dtype=np.float32)
-                    reduced_split = np.concatenate([reduced_split, pad], axis=1)
+        # Reuse the whole-contig PCA basis so whole and split embeddings are comparable.
+        reduced_split = apply_reducer(reducer, split_features, out_dim)
     else:
-        reduced_split = np.zeros((0, reduced_whole.shape[1]), dtype=np.float32)
+        reduced_split = np.zeros((0, out_dim), dtype=np.float32)
 
     np.save(SPLIT_OUTPUT, reduced_split)
     save_names(SPLIT_NAMES, split_names)
