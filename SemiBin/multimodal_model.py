@@ -228,10 +228,24 @@ def train_multimodal_self(logger, datapaths, data_splits, dnabert_embeddings,
         logger.info(f'Training multimodal model (epoch {epoch + 1}/{epoches})')
         for data_index, (datapath, data_split_path) in enumerate(zip(datapaths, data_splits)):
             data = pd.read_csv(datapath, index_col=0)
+            data.index = data.index.astype(str)
             data_split = pd.read_csv(data_split_path, index_col=0)
+            data_split.index = data_split.index.astype(str)
 
             whole_comp, whole_abund = _split_features(data.values)
             split_comp, split_abund = _split_features(data_split.values)
+            # In non-combined mode data_split carries only composition (no abundance), so
+            # split_abund is width 0 while whole_abund is width A. The two halves of a contig
+            # share their parent's abundance, so fill split abundance from the parent contig
+            # (h_1 / h_2 -> h) to keep whole/split abundance dimensions aligned. Without this
+            # the np.concatenate below raises and multimodal training silently falls back.
+            if split_abund.shape[1] != whole_abund.shape[1]:
+                if whole_abund.shape[1] > 0:
+                    abund_cols = data.columns[136:]
+                    parents = [name.rpartition('_')[0] for name in data_split.index]
+                    split_abund = data.reindex(parents)[abund_cols].fillna(0.0).values.astype(np.float32)
+                else:
+                    split_abund = np.zeros((len(split_comp), 0), dtype=np.float32)
             whole_dna = dnabert_embeddings[data_index]
             split_dna = dnabert_split_embeddings[data_index]
 
@@ -270,7 +284,7 @@ def train_multimodal_self(logger, datapaths, data_splits, dnabert_embeddings,
                 batch_size=batchsize,
                 shuffle=True,
                 num_workers=0,
-                drop_last=False,
+                drop_last=True,  # BatchNorm1d crashes on a trailing batch of size 1
             )
 
             for batch in loader:

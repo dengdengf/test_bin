@@ -1419,6 +1419,9 @@ import os
 import sys
 os.environ['LD_LIBRARY_PATH'] = os.path.join(os.path.dirname(sys.executable), '../lib') + ':' + os.environ.get('LD_LIBRARY_PATH', '')
 
+import gzip
+import bz2
+import lzma
 import numpy as np
 import pandas as pd
 import torch
@@ -1426,6 +1429,15 @@ from Bio import SeqIO
 from sklearn.decomposition import PCA
 from tqdm import tqdm
 from transformers import AutoModel, AutoTokenizer
+
+def _open_fasta(path):
+    if path.endswith('.gz'):
+        return gzip.open(path, 'rt')
+    if path.endswith('.bz2'):
+        return bz2.open(path, 'rt')
+    if path.endswith('.xz'):
+        return lzma.open(path, 'rt')
+    return open(path, 'rt')
 
 MODEL_PATH = r"{dnabert_model_path}"
 FASTA_PATH = r"{contig_fasta}"
@@ -1460,12 +1472,21 @@ def encode_sequences(model, tokenizer, seq_names, seq_dict, device):
         )
         input_ids = enc['input_ids'].to(device)
         attention_mask = enc.get('attention_mask')
+        if attention_mask is not None:
+            attention_mask = attention_mask.to(device)
         with torch.no_grad():
-            hidden_states = model(input_ids)[0]
+            try:
+                # Pass the mask so PAD tokens do not participate in self-attention.
+                if attention_mask is not None:
+                    hidden_states = model(input_ids, attention_mask=attention_mask)[0]
+                else:
+                    hidden_states = model(input_ids)[0]
+            except TypeError:
+                hidden_states = model(input_ids)[0]
             if attention_mask is not None:
                 # Mean-pool over real tokens only, so right-padding does not dilute the
                 # embedding (critical now that sequences are batched and padded together).
-                mask = attention_mask.to(device).unsqueeze(-1).type_as(hidden_states)
+                mask = attention_mask.unsqueeze(-1).type_as(hidden_states)
                 summed = (hidden_states * mask).sum(dim=1)
                 counts = mask.sum(dim=1).clamp(min=1.0)
                 batch_emb = summed / counts
@@ -1478,8 +1499,8 @@ def fit_reducer(features, target_dim):
     # Fit the PCA ONCE on the whole-contig features and reuse it for the split contigs so
     # both live in the SAME basis -- otherwise the contrastive loss compares embeddings
     # from two unrelated PCA coordinate systems.
-    if features.shape[0] == 0:
-        return None, features
+    if features.shape[0] < 2:
+        return None, features.astype(np.float32)
     n_components = min(target_dim, features.shape[0], features.shape[1])
     if n_components >= features.shape[1]:
         return None, features.astype(np.float32)
@@ -1506,10 +1527,12 @@ def main():
     split_names = split_df.index.astype(str).tolist()
 
     # Keep every parent contig sequence; split contigs (named h_1 / h_2) are not in the
-    # FASTA and are reconstructed below by halving their parent.
+    # FASTA and are reconstructed below by halving their parent. _open_fasta handles
+    # gzip/bz2/xz-compressed contig FASTA (SeqIO.parse does not auto-decompress).
     seq_dict = {{}}
-    for record in SeqIO.parse(FASTA_PATH, 'fasta'):
-        seq_dict[str(record.id)] = str(record.seq)
+    with _open_fasta(FASTA_PATH) as _fa_handle:
+        for record in SeqIO.parse(_fa_handle, 'fasta'):
+            seq_dict[str(record.id)] = str(record.seq)
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH, trust_remote_code=True, local_files_only=True)

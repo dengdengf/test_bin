@@ -1,5 +1,8 @@
 import argparse
 import time
+import gzip
+import bz2
+import lzma
 from pathlib import Path
 import torch
 import numpy as np
@@ -7,6 +10,16 @@ from Bio import SeqIO
 from transformers import AutoTokenizer, AutoModel
 from tqdm import tqdm
 from sklearn.decomposition import PCA
+
+
+def _open_fasta(path):
+    if path.endswith('.gz'):
+        return gzip.open(path, 'rt')
+    if path.endswith('.bz2'):
+        return bz2.open(path, 'rt')
+    if path.endswith('.xz'):
+        return lzma.open(path, 'rt')
+    return open(path, 'rt')
 
 # ----------------------------------------------------------------
 # 参数设置
@@ -69,9 +82,10 @@ model.eval()
 def read_fasta(path):
     """读取 FASTA, 返回 (names, seqs), 顺序严格一致。"""
     names, seqs = [], []
-    for record in tqdm(SeqIO.parse(path, "fasta"), desc=f"读取 {Path(path).name}"):
-        names.append(record.id)
-        seqs.append(str(record.seq))
+    with _open_fasta(path) as handle:
+        for record in tqdm(SeqIO.parse(handle, "fasta"), desc=f"读取 {Path(path).name}"):
+            names.append(record.id)
+            seqs.append(str(record.seq))
     return names, seqs
 
 
