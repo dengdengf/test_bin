@@ -57,7 +57,6 @@ python SemiBin/generate_berts.py -md /path/DNABERT-S \
 | `--fusion-weights EMB COMP ABUND` | `0.60 0.25 0.15` | **非**多模态时三视图（embedding / 组成 / 丰度）的融合权重。 |
 | `--fusion-weights-multimodal EMB COMP ABUND DNA` | `0.45 0.15 0.15 0.25` | 多模态时四视图（embedding / 组成 / 丰度 / DNABERT）的融合权重。 |
 | `--no-coabundance-kl` | 关闭 | 关闭多样本（非 combined）下的"共丰度 KL 散度"边权调制。 |
-| `--cluster-algorithm {leiden,infomap}` | `leiden` | 全局社区检测算法；`infomap` 仅作为可选项保留。 |
 | `--cluster-resolution FLOAT` | `1.0` | Leiden 模块度分辨率；越大 bin 越多、越小。 |
 
 调参提示：

@@ -147,7 +147,6 @@ DNABERT / 训练(作用于 `single_easy_bin`、`multi_easy_bin`):
 | `--fusion-weights EMB COMP ABUND` | 无 DNABERT 时三视图融合权重 | `0.60 0.25 0.15` |
 | `--fusion-weights-multimodal EMB COMP ABUND DNA` | 多模态四视图融合权重 | `0.45 0.15 0.15 0.25` |
 | `--no-coabundance-kl` | 关闭多样本共丰度 KL 调制 | 关(即默认启用 KL) |
-| `--cluster-algorithm {leiden,infomap}` | 全局社区检测算法 | `leiden` |
 | `--cluster-resolution FLOAT` | Leiden 模块度分辨率(越大 bin 越多、越小) | `1.0` |
 
 `generate_berts.py` 参数:`-md` 模型目录;`-fd/-nd/-dd` whole 的 fasta/names/npy;`-sfd/-snd/-sdd`(可选)split 的 fasta/names/npy;`--batch_size`(默认 8)、`--max_length`(默认 5000)、`--target_dim`(默认 128)。

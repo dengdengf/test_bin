@@ -75,7 +75,6 @@ DNABERT-S 预训练权重较大，已被 gitignore、不随仓库分发，需单
 
 | 参数 | 说明 |
 | --- | --- |
-| `--cluster-algorithm {leiden,infomap}` | 全局社区检测算法，默认 `leiden`；`infomap` 仅作为可选项保留。 |
 | `--cluster-resolution FLOAT` | Leiden 模块度分辨率，默认 `1.0`；越大 bin 越多、越小 bin 越少。 |
 | `--knn-kernel` / `--fusion-weights` / `--fusion-weights-multimodal` | 图融合的核函数与各模态融合权重。 |
 | `--no-coabundance-kl` | 关闭多样本路径下的共丰度 KL 散度边权调制。 |

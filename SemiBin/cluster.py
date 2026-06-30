@@ -14,36 +14,11 @@ from .graph_fusion import (
 )
 from .marker_refinement import refine_contaminated_bin
 
-# This is the default in the igraph package
-NR_INFOMAP_TRIALS = 10
-
-def run_infomap1(g, edge_weights, vertex_weights, trials):
-    return g.community_infomap(edge_weights=edge_weights, vertex_weights=vertex_weights, trials=trials)
-
-def run_infomap(g, edge_weights, vertex_weights, num_process):
-    '''Run infomap, using multiple processors (if available)'''
-    if num_process == 1:
-        return g.community_infomap(edge_weights=edge_weights, vertex_weights=vertex_weights, trials=NR_INFOMAP_TRIALS)
-    import multiprocessing as mp
-    with mp.Pool(min(num_process, NR_INFOMAP_TRIALS)) as p:
-        rs = [p.apply_async(run_infomap1, (g, edge_weights, vertex_weights, 1))
-                for _ in range(NR_INFOMAP_TRIALS)]
-        p.close()
-        p.join()
-    rs = [r.get() for r in rs]
-    best = rs[0]
-    for r in rs[1:]:
-        if r.codelength < best.codelength:
-            best = r
-    return best
-
-
 def run_leiden(g, edge_weights, resolution, random_seed=None):
     """Global community detection with the Leiden algorithm (modularity objective).
 
-    This is the default global clustering step: compared with Infomap, Leiden is faster,
-    guarantees well-connected communities, and exposes a resolution knob for bin
-    granularity. Returns a VertexClustering with the same interface Infomap returned.
+    Leiden is fast, guarantees well-connected communities, and exposes a resolution knob
+    for bin granularity. Returns a VertexClustering of the graph's vertices.
     """
     import igraph
     if random_seed is not None:
@@ -65,14 +40,6 @@ def run_leiden(g, edge_weights, resolution, random_seed=None):
             weights=edge_weights,
             n_iterations=-1,
             resolution_parameter=resolution)
-
-
-def run_community_detection(g, edge_weights, vertex_weights, *,
-                            algorithm, resolution, num_process, random_seed):
-    """Dispatch global community detection. Default 'leiden'; 'infomap' kept as an option."""
-    if algorithm == 'infomap':
-        return run_infomap(g, edge_weights, vertex_weights, num_process)
-    return run_leiden(g, edge_weights, resolution, random_seed=random_seed)
 
 
 def cal_kl(m, v, use_ne='auto'):
@@ -171,14 +138,13 @@ def _prepare_feature_views(data, is_combined):
     return composition, abundance, model_input
 
 
-def run_embed_infomap(logger, model, data, *,
+def run_embed_cluster(logger, model, data, *,
             device, max_edges, max_node, is_combined, n_sample, contig_dict,
             num_process: int, random_seed, dnabert_embedding=None,
             knn_kernel='median',
             weights_base=(0.60, 0.25, 0.15),
             weights_multimodal=(0.45, 0.15, 0.15, 0.25),
             use_coabundance_kl=True,
-            cluster_algorithm='leiden',
             cluster_resolution=1.0):
     """
     Cluster contigs into bins
@@ -263,19 +229,11 @@ def run_embed_infomap(logger, model, data, *,
             edge_weights = edge_weights * kl_sim
             logger.debug('Applied co-abundance KL modulation to clustering edge weights.')
 
-    logger.debug(f'Running {cluster_algorithm} community detection for global clustering...')
+    logger.debug('Running Leiden community detection for global clustering...')
     g = Graph()
     g.add_vertices(np.arange(num_contigs))
     g.add_edges(edges)
-    length_weight = np.array([len(contig_dict[name]) for name in data.index])
-    result = run_community_detection(
-        g,
-        edge_weights,
-        length_weight,
-        algorithm=cluster_algorithm,
-        resolution=cluster_resolution,
-        num_process=num_process,
-        random_seed=random_seed)
+    result = run_leiden(g, edge_weights, cluster_resolution, random_seed=random_seed)
 
     contig_labels = np.zeros(shape=num_contigs, dtype=int)
     for i, r in enumerate(result):
@@ -529,7 +487,7 @@ def cluster(logger, model, data, device, is_combined,
     import os
     import shutil
 
-    embedding, contig_labels = run_embed_infomap(logger, model, data,
+    embedding, contig_labels = run_embed_cluster(logger, model, data,
             device=device, max_edges=args.max_edges, max_node=args.max_node,
             is_combined=is_combined, n_sample=n_sample,
             contig_dict=contig_dict, num_process=args.num_process,
@@ -539,7 +497,6 @@ def cluster(logger, model, data, device, is_combined,
             weights_base=tuple(getattr(args, 'fusion_weights_base', None) or (0.60, 0.25, 0.15)),
             weights_multimodal=tuple(getattr(args, 'fusion_weights_multimodal', None) or (0.45, 0.15, 0.15, 0.25)),
             use_coabundance_kl=not getattr(args, 'no_coabundance_kl', False),
-            cluster_algorithm=getattr(args, 'cluster_algorithm', 'leiden'),
             cluster_resolution=getattr(args, 'cluster_resolution', 1.0))
 
     if args.write_pre_reclustering_bins or not args.recluster:

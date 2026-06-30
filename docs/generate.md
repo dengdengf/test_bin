@@ -165,7 +165,6 @@ python SemiBin/generate_berts.py -md /path/DNABERT-S \
 
 | 参数 | 默认值 | 说明 |
 | --- | --- | --- |
-| `--cluster-algorithm {leiden,infomap}` | `leiden` | 全局社区检测算法；`infomap` 仅作为可选项保留 |
 | `--cluster-resolution FLOAT` | `1.0` | Leiden 模块度分辨率；越大 bin 越多，越小 bin 越少 |
 
 图融合 / 聚类相关参数（`single_easy_bin` / `multi_easy_bin` / `bin`）见 [usage.md](usage.md) 与 [subcommands.md](subcommands.md)。MAGFuse 用 **Leiden** 做全局社区检测（模块度目标）。

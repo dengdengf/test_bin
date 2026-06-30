@@ -32,7 +32,7 @@
 `SemiBin/graph_fusion.py` 与 `SemiBin/cluster.py`：对每一种视图（embedding、组成、丰度，以及 DNABERT）分别构建 kNN 相似度图，按权重**加权融合**成单一图后，用 **Leiden** 做全局社区发现聚类。
 
 - 融合权重与核函数可配置（见 [命令行参数](#命令行参数)）。
-- 全局社区检测算法、模块度分辨率可配置（见 [命令行参数](#命令行参数)）。
+- 全局社区检测算法固定采用 **Leiden**；模块度分辨率可配置（见 [命令行参数](#命令行参数)）。
 - 在**多样本（非 combined）**场景下，引入「共丰度 KL 散度」作为**边权调制**，并**逐边计算**以省内存：同一基因组的 contig 在样本间的覆盖度分布应当一致，逐边的 KL 调制把这种跨样本信号注入图边权。
 
 ### 3. 标记基因去污染重聚类
@@ -75,7 +75,6 @@ DNABERT-S 预训练权重较大，已 gitignore，**不随仓库分发**；需�
 | `--fusion-weights EMB COMP ABUND` | `0.60 0.25 0.15` | 无 DNABERT 时各视图融合权重 |
 | `--fusion-weights-multimodal EMB COMP ABUND DNA` | `0.45 0.15 0.15 0.25` | 含 DNABERT 时各视图融合权重 |
 | `--no-coabundance-kl` | 关闭（即默认启用 KL 调制） | 关闭共丰度 KL 边权调制 |
-| `--cluster-algorithm {leiden,infomap}` | `leiden` | 全局社区检测算法（infomap 仅作为可选项保留） |
 | `--cluster-resolution FLOAT` | `1.0` | Leiden 模块度分辨率（越大 bin 越多、越小） |
 
 ---

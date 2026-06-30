@@ -114,5 +114,4 @@ flowchart LR
 
 | 参数 | 默认值 | 说明 |
 | --- | --- | --- |
-| `--cluster-algorithm {leiden,infomap}` | `leiden` | 全局社区检测算法；infomap 仅作为可选项保留 |
 | `--cluster-resolution FLOAT` | `1.0` | Leiden 模块度分辨率；越大 bin 越多、越小 bin 越少 |

@@ -44,7 +44,6 @@ MAGFuse 采用**子命令**式接口。大多数场景只需 `single_easy_bin` �
 下列参数控制多视图相似度图融合聚类（`SemiBin/graph_fusion.py` 与 `SemiBin/cluster.py`）。对 embedding / 组成 / 丰度 / DNABERT 各建一张 kNN 相似度图，按权重融合后用 **Leiden** 做全局社区检测。
 
 * `--knn-kernel {median,local}`：kNN 相似度图所用的核函数（默认 `median`）。
-* `--cluster-algorithm {leiden,infomap}`：全局社区检测算法（默认 `leiden`；`infomap` 仅作为可选项保留）。
 * `--cluster-resolution FLOAT`：Leiden 模块度分辨率（默认 `1.0`；越大 bin 越多、越小 bin 越少）。
 * `--fusion-weights EMB COMP ABUND`：未启用 DNABERT 时的三路融合权重（默认 `0.60 0.25 0.15`，依次对应 embedding / 组成 / 丰度）。
 * `--fusion-weights-multimodal EMB COMP ABUND DNA`：启用 DNABERT 时的四路融合权重（默认 `0.45 0.15 0.15 0.25`，依次对应 embedding / 组成 / 丰度 / DNABERT）。
@@ -109,7 +108,7 @@ MAGFuse 采用**子命令**式接口。大多数场景只需 `single_easy_bin` �
 * `-s/--separator`：多样本分箱时用于分隔样本名与 contig 名的字符（默认 `:`）。
 * `--self-supervised` 或 `--semi-supervised`：指定训练算法，同 `single_easy_bin`。
 * 多模态 / DNABERT 训练参数 `--dnabert-model`、`--dnabert-python`，含义同 `single_easy_bin`。
-* 图融合 / 聚类参数 `--knn-kernel`、`--cluster-algorithm`、`--cluster-resolution`、`--fusion-weights`、`--fusion-weights-multimodal`、`--no-coabundance-kl`，含义同 `single_easy_bin`。注意：共丰度 KL 散度调制在多样本（非 combined）场景下默认启用，`--no-coabundance-kl` 可将其关闭。
+* 图融合 / 聚类参数 `--knn-kernel`、`--cluster-resolution`、`--fusion-weights`、`--fusion-weights-multimodal`、`--no-coabundance-kl`，含义同 `single_easy_bin`。注意：共丰度 KL 散度调制在多样本（非 combined）场景下默认启用，`--no-coabundance-kl` 可将其关闭。
 * `--reference-db-data-dir`、`--processes`、`--minfasta-kbs`、`--epochs`、`--batch-size`、`--max-node`、`--max-edges`、`--random-seed`、`--ratio`、`--min-len`、`--ml-threshold`、`--no-recluster`、`--orf-finder`、`--engine` 与 `--tmpdir`，含义同 `single_easy_bin`。
 
 ### generate_cannot_links
@@ -254,7 +253,7 @@ MAGFuse 采用**子命令**式接口。大多数场景只需 `single_easy_bin` �
 
 #### 可选参数
 
-* 图融合 / 聚类参数 `--knn-kernel`、`--cluster-algorithm`、`--cluster-resolution`、`--fusion-weights`、`--fusion-weights-multimodal`、`--no-coabundance-kl`，含义同 `single_easy_bin`（这些参数影响短读长的图融合聚类与重聚类阶段）。
+* 图融合 / 聚类参数 `--knn-kernel`、`--cluster-resolution`、`--fusion-weights`、`--fusion-weights-multimodal`、`--no-coabundance-kl`，含义同 `single_easy_bin`（这些参数影响短读长的图融合聚类与重聚类阶段）。
 * `--minfasta-kbs`、`--max-node`、`--max-edges`、`-p/--processes/-t/--threads`、`--random-seed`、`--environment`、`--ratio`、`--min-len`、`--no-recluster`、`--orf-finder`、`--engine` 与 `--depth-metabat2`，含义同 `single_easy_bin`。
 
 > 关于短读长的重聚类：MAGFuse 对被判为污染的 bin 采用“带种子的标签传播”（personalized-PageRank，α 随 bin 大小自适应、按 contig 长度加权扩散、用 top-2 置信度边际把边界 contig 留作未分配）进行去污染拆分，且仅当单拷贝标记基因冗余度下降时才接受拆分（见 `SemiBin/marker_refinement.py`）。

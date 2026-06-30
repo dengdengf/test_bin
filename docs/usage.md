@@ -27,7 +27,7 @@
 MAGFuse 在**短读长**（`short_read`）流程中**默认且始终启用**多模态嵌入，提供以下能力（仅在此处罗列，详见 [methods](methods.md)）：
 
 - **多模态嵌入模型**（组成 / 丰度 / DNABERT 三分支 + 学习式门控融合 + 跨模态对齐损失）：是短读长训练路径的常规组成部分，无需手动开启。
-- **多视图相似度图融合聚类**：对 embedding / 组成 / 丰度 / DNABERT 各建 kNN 相似度图，加权融合后用 **Leiden** 做全局社区检测。融合权重、核函数可配置，并在多样本（非 combined）下重新引入“共丰度 KL 散度”边权调制。
+- **多视图相似度图融合聚类**：对 embedding / 组成 / 丰度 / DNABERT 各建 kNN 相似度图，加权融合后用 **Leiden** 做全局社区检测（Leiden 是唯一的全局社区检测算法）。融合权重、核函数可配置，并在多样本（非 combined）下重新引入“共丰度 KL 散度”边权调制。
 - **标记基因去污染重聚类**：在被判为污染的 bin 内做带种子的标签传播，仅当单拷贝标记基因冗余度下降时才接受拆分。
 
 相关命令行参数：
@@ -38,7 +38,6 @@ MAGFuse 在**短读长**（`short_read`）流程中**默认且始终启用**多�
 | `--fusion-weights EMB COMP ABUND` | 同上 | `0.60 0.25 0.15` | 基础融合权重（不含 DNABERT 分支时） |
 | `--fusion-weights-multimodal EMB COMP ABUND DNA` | 同上 | `0.45 0.15 0.15 0.25` | 含 DNABERT 分支时的融合权重 |
 | `--no-coabundance-kl` | 同上 | （默认开启 KL） | 关闭共丰度 KL 调制 |
-| `--cluster-algorithm {leiden,infomap}` | 同上 | `leiden` | 全局社区检测算法（`infomap` 仅作为可选项保留） |
 | `--cluster-resolution FLOAT` | 同上 | `1.0` | Leiden 模块度分辨率（越大 bin 越多、越小） |
 | `--dnabert-model PATH` | `single_easy_bin` / `multi_easy_bin` | 内置 `SemiBin/DNABERT-S` 目录 | DNABERT-S 权重路径 |
 | `--dnabert-python PATH` | 同上 | `$SEMIBIN_DNABERT_PYTHON` 或当前解释器 | 运行 DNABERT 推理的 Python 解释器 |
@@ -120,7 +119,7 @@ MAGFuse single_easy_bin \
         -o output
 ```
 
-全局社区检测默认用 Leiden，可用 `--cluster-resolution` 调整 bin 粒度（也可用 `--cluster-algorithm infomap` 切换到 Infomap）：
+全局社区检测用 Leiden（唯一算法），可用 `--cluster-resolution` 调整 bin 粒度：
 
 ```bash
 MAGFuse single_easy_bin \
@@ -182,7 +181,7 @@ MAGFuse bin_short \
     -o S1_output
 ```
 
-`bin` / `bin_short` 同样接受 `--knn-kernel`、`--fusion-weights`、`--no-coabundance-kl`、`--cluster-algorithm`、`--cluster-resolution` 等图融合参数。
+`bin` / `bin_short` 同样接受 `--knn-kernel`、`--fusion-weights`、`--no-coabundance-kl`、`--cluster-resolution` 等图融合参数。
 
 ---
 

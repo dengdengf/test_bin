@@ -9,7 +9,7 @@
 | # | 模块 | 设计 |
 |---|------|------|
 | 1 | 多模态嵌入模型<br>(`SemiBin/multimodal_model.py`) | 组成 / 丰度 / DNABERT 三分支编码 + 学习式 softmax 门控融合 + 跨模态对齐损失（向 DNABERT 单向对齐，使用 stop-gradient/detach）。**短读长 (`short_read`) 训练路径默认且始终启用。** |
-| 2 | 多视图相似度图融合聚类<br>(`SemiBin/graph_fusion.py` + `cluster.py`) | 对 embedding / 组成 / 丰度 / DNABERT 各建 kNN 相似度图，加权融合后用 **Leiden** 做全局社区检测；融合权重、核函数与聚类算法/分辨率可配置。在多样本（非 combined）下引入"共丰度 KL 散度"边权调制（逐边计算，省内存）。 |
+| 2 | 多视图相似度图融合聚类<br>(`SemiBin/graph_fusion.py` + `cluster.py`) | 对 embedding / 组成 / 丰度 / DNABERT 各建 kNN 相似度图，加权融合后用 **Leiden** 做全局社区检测；融合权重、核函数与聚类分辨率可配置。在多样本（非 combined）下引入"共丰度 KL 散度"边权调制（逐边计算，省内存）。 |
 | 3 | 标记基因去污染重聚类<br>(`SemiBin/marker_refinement.py`) | 在被判为污染的 bin 内做"带种子的标签传播"(personalized-PageRank，α 随 bin 大小自适应、按 contig 长度加权扩散、用 top-2 置信度边际把边界 contig 留作未分配)；**仅当单拷贝标记基因冗余度下降时才接受拆分。** |
 | 4 | DNABERT 特征提取<br>(`SemiBin/generate_berts.py`) | 批量推理 + `attention_mask` 掩码均值池化；`whole` 与 `split` **共享同一个 PCA basis**（在 `whole` 上 fit、对 `split` 用 transform）。 |
 
@@ -30,7 +30,6 @@ DNABERT / 训练（`single_easy_bin`、`multi_easy_bin`）：
 | `--fusion-weights EMB COMP ABUND` | `0.60 0.25 0.15` | 无 DNABERT 时的融合权重 |
 | `--fusion-weights-multimodal EMB COMP ABUND DNA` | `0.45 0.15 0.15 0.25` | 有 DNABERT 时的融合权重 |
 | `--no-coabundance-kl` | （开启）| 关闭共丰度 KL 调制 |
-| `--cluster-algorithm {leiden,infomap}` | `leiden` | 全局社区检测算法（infomap 仅作为可选项保留）|
 | `--cluster-resolution FLOAT` | `1.0` | Leiden 模块度分辨率（越大 bin 越多、越小）|
 
 ### 关键要点
@@ -166,7 +165,7 @@ This is a bugfix release for _version 2.0.0_.
 
 Big change is the added binning algorithm for assemblies from long-read datasets.
 
-When clustering, it does not use infomap, but another procedure (an iterative version of DBSCAN).
+When clustering, it does not use the graph community-detection step, but another procedure (an iterative version of DBSCAN).
 
 Use the flag `--sequencing-type=long_read` to enable an alternative clustering that works better with long reads.
 

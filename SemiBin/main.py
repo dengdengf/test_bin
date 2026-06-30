@@ -585,13 +585,6 @@ def parse_args(args):
                           dest='no_coabundance_kl',
                           help='Disable the variance-aware co-abundance (KL) modulation of clustering edges in multi-sample mode.')
 
-        g.add_argument('--cluster-algorithm',
-                          required=False,
-                          choices=['leiden', 'infomap'],
-                          default='leiden',
-                          dest='cluster_algorithm',
-                          help='Global community-detection algorithm used for clustering (default: leiden).')
-
         g.add_argument('--cluster-resolution',
                           required=False,
                           type=float,
