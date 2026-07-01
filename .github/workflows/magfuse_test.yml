@@ -1,0 +1,44 @@
+name: magfuse_test
+
+on: [push, pull_request]
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python-version: ["3.9", "3.11", "3.12"]
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          pip install .
+
+      - name: Run unit tests (tolerate "no tests" until a suite is added)
+        shell: bash
+        run: |
+          set +e
+          python -m pytest -q
+          rc=$?
+          set -e
+          if [ "$rc" = "5" ]; then
+            echo "pytest: no tests collected — skipping"
+          elif [ "$rc" != "0" ]; then
+            exit "$rc"
+          fi
+
+      - name: Smoke test (imports + CLI help)
+        shell: bash
+        run: |
+          python -c "import SemiBin.main, SemiBin.cluster, SemiBin.multimodal_model, SemiBin.graph_fusion, SemiBin.marker_refinement"
+          MAGFuse -h

@@ -36,6 +36,7 @@ dependencies = [
     "scikit-learn",
     "requests",
     "numexpr",
+    "biopython",
 ]
 urls = { homepage = "https://github.com/dengdengf/test_bin" }
 
