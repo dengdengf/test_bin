@@ -430,7 +430,8 @@ def parse_args(args):
                        default=0.05)
 
     for p in [single_easy_bin, multi_easy_bin, generate_sequence_features_single]:
-        p.add_argument('-b', '--input-bam',
+        if p is not multi_easy_bin:
+            p.add_argument('-b', '--input-bam',
                               required=False,
                               nargs='*',
                               help='Path to the input BAM(.bam)/CRAM(.cram) file(s). '
@@ -440,7 +441,7 @@ def parse_args(args):
                               default=None,
                               )
 
-        p.add_argument('-a', '--abundance',
+            p.add_argument('-a', '--abundance',
                               required=False,
                               nargs='*',
                               help='Path to the abundance file from strobealign-aemb. This can only be used when samples used in binning above or equal 5.',
