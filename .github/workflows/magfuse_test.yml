@@ -22,7 +22,7 @@ jobs:
       - name: Install package
         run: |
           python -m pip install --upgrade pip
-          pip install .
+          pip install ".[dev]"
 
       - name: Run unit tests (tolerate "no tests" until a suite is added)
         shell: bash
